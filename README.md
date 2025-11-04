@@ -61,7 +61,7 @@ See [Architecture Documentation](docs/architecture/system-design.md) for details
 
 - **AWS Account** with appropriate permissions
 - **Terraform** >= 1.6.0
-- **Python** 3.11+
+- **Python** 3.12+
 - **Node.js** 18+
 - **Docker** (for local testing)
 - **Git** with SSH keys configured
@@ -75,17 +75,13 @@ git clone git@github.com:jujubear24/ai-customer-service-bot.git
 cd ai-customer-service-bot
 ```
 
-### 2. Install Dependencies
+### 2. Run the Setup Script
+
+The setup script will install all Python and Node dependencies, generate necessary config files, and install pre-commit hooks.
 
 ```bash
-# Python dependencies
-pip install -r requirements.txt
-
-# Node dependencies
-cd web && npm install && cd ..
-
-# Pre-commit hooks
-pre-commit install
+chmod +x scripts/setup.sh
+./scripts/setup.sh
 ```
 
 ### 3. Configure AWS Credentials
