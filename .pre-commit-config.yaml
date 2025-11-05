@@ -45,7 +45,7 @@ repos:
     rev: v1.8.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
+        additional_dependencies: []
         args: [--ignore-missing-imports, --python-version=3.12]
         files: ^lambda/
 
@@ -93,4 +93,3 @@ repos:
       - id: prettier
         types_or: [javascript, jsx, ts, tsx, json, markdown, yaml]
         files: ^web/
-
