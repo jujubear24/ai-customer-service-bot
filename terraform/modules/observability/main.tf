@@ -122,3 +122,37 @@ resource "aws_cloudwatch_metric_alarm" "aggregate_lambda_errors" {
 
   tags = var.common_tags
 }
+
+# ==============================================================================
+# AWS Budget Alerts
+# ==============================================================================
+
+resource "aws_budgets_budget" "cost" {
+  name              = "${var.project_name}-monthly-budget-${var.environment}"
+  budget_type       = "COST"
+  limit_amount      = var.budget_amount
+  limit_unit        = "USD"
+  time_period_start = "2024-01-01_00:00"
+  time_period_end   = "2087-06-15_00:00"
+  time_unit         = "MONTHLY"
+
+  # Alert when forecasted to exceed 100% of budget
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = var.alert_emails
+  }
+
+  # Alert when actual costs exceed 80% of budget
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = var.alert_emails
+  }
+
+  tags = var.common_tags
+}

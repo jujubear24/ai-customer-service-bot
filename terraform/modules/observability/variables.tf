@@ -33,6 +33,20 @@ variable "log_retention_days" {
 }
 
 # ==============================================================================
+# Budget Configuration
+# ==============================================================================
+
+variable "budget_amount" {
+  description = "The monthly budget limit in USD"
+  type        = string
+}
+
+variable "alert_emails" {
+  description = "List of email addresses to receive budget alerts"
+  type        = list(string)
+}
+
+# ==============================================================================
 # Tagging
 # ==============================================================================
 

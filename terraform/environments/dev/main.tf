@@ -43,5 +43,9 @@ module "observability" {
 
   log_retention_days = 7 # Keep dev logs for 7 days to save costs
 
+  # Budget Configuration
+  budget_amount = "25"              # Set to $25 as requested
+  alert_emails  = [var.alert_email] # Pass the email from tfvars
+
   common_tags = var.common_tags
 }
