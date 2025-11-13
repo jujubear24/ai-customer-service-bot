@@ -1,115 +1,134 @@
+# =============================================================================
+# Continuous Integration Workflow
+# =============================================================================
+# This GitHub Actions workflow automates testing, linting, type checking,
+# security scanning, and Terraform validation for both Python (via uv)
+# and TypeScript projects.
+#
+# It runs on pushes and pull requests to the main and dev branches.
+#
+# Python uses uv for dependency management and virtual environments.
+# Node.js jobs use npm and are scoped to the /web directory.
+#
+# =============================================================================
+
 name: CI
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [main, dev]
   pull_request:
-    branches: [ main, dev ]
+    branches: [main, dev]
 
 env:
-  PYTHON_VERSION: '3.12'
-  NODE_VERSION: '18'
-  TERRAFORM_VERSION: '1.6.0'
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "18"
+  TERRAFORM_VERSION: "1.6.0"
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Python Linting and Formatting (Ruff)
+  # ---------------------------------------------------------------------------
   lint-python:
     name: Lint Python
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install UV
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Install dependencies
         run: uv sync --all-extras
-      
-      - name: Run Black
-        run: uv run black --check lambda/ --line-length=100
-      
-      - name: Run isort
-        run: uv run isort --check-only lambda/ --profile=black
-      
-      - name: Run flake8
-        run: uv run flake8 lambda/ --max-line-length=100 --extend-ignore=E203
-      
-      - name: Run pylint
-        run: uv run pylint lambda/functions lambda/layers --rcfile=.pylintrc --exit-zero
 
+      - name: Run Ruff Linter
+        run: uv run ruff check lambda/
+
+      - name: Run Ruff Formatter Check
+        run: uv run ruff format --check lambda/
+
+  # ---------------------------------------------------------------------------
+  # Python Type Checking (mypy)
+  # ---------------------------------------------------------------------------
   typecheck-python:
     name: Type Check Python
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install UV
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Install dependencies
+      - name: Install dependencies (including stubs)
         run: uv sync --all-extras
-      
-      - name: Run mypy
-        run: uv run mypy lambda/ --ignore-missing-imports --python-version=3.11
 
+      - name: Run mypy
+        run: uv run mypy --ignore-missing-imports --python-version=3.12 lambda/
+
+  # ---------------------------------------------------------------------------
+  # Python Unit Tests
+  # ---------------------------------------------------------------------------
   test-python:
     name: Test Python
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install UV
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Install dependencies
         run: uv sync --all-extras
-      
+
       - name: Run unit tests
-        run: |
-          cd lambda
-          uv run pytest tests/unit -v --cov=functions --cov-report=xml --cov-report=term-missing
-      
+        run: ./scripts/test-lambdas.sh
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
-          file: ./lambda/coverage.xml
+          files: ./coverage.xml
           flags: python
           name: python-coverage
+          fail_ci_if_error: true
 
+  # ---------------------------------------------------------------------------
+  # Python Security Scan (bandit)
+  # ---------------------------------------------------------------------------
   security-python:
     name: Security Scan Python
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install UV
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Install dependencies
         run: uv sync --all-extras
-      
+
       - name: Run bandit
         run: uv run bandit -r lambda/ -ll -f json -o bandit-report.json
-      
+
       - name: Upload bandit report
         if: always()
         uses: actions/upload-artifact@v3
@@ -117,6 +136,9 @@ jobs:
           name: bandit-report
           path: bandit-report.json
 
+  # ---------------------------------------------------------------------------
+  # TypeScript Linting and Formatting
+  # ---------------------------------------------------------------------------
   lint-typescript:
     name: Lint TypeScript
     runs-on: ubuntu-latest
@@ -125,23 +147,26 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: web/package-lock.json
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Run ESLint
         run: npm run lint
-      
+
       - name: Run Prettier check
         run: npm run format:check
 
+  # ---------------------------------------------------------------------------
+  # TypeScript Type Checking
+  # ---------------------------------------------------------------------------
   typecheck-typescript:
     name: Type Check TypeScript
     runs-on: ubuntu-latest
@@ -150,20 +175,23 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: web/package-lock.json
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Type check
         run: npm run typecheck
 
+  # ---------------------------------------------------------------------------
+  # TypeScript Unit Tests
+  # ---------------------------------------------------------------------------
   test-typescript:
     name: Test TypeScript
     runs-on: ubuntu-latest
@@ -172,20 +200,20 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: web/package-lock.json
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Run tests
         run: npm run test:ci
-      
+
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
@@ -193,6 +221,9 @@ jobs:
           flags: typescript
           name: typescript-coverage
 
+  # ---------------------------------------------------------------------------
+  # TypeScript Build
+  # ---------------------------------------------------------------------------
   build-typescript:
     name: Build TypeScript
     runs-on: ubuntu-latest
@@ -201,59 +232,77 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: web/package-lock.json
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Build
         run: npm run build
         env:
           NEXT_PUBLIC_API_URL: https://api-dev.example.com
           NEXT_PUBLIC_WEBSOCKET_URL: wss://ws-dev.example.com
 
+  # ---------------------------------------------------------------------------
+  # Terraform Validation
+  # ---------------------------------------------------------------------------
   validate-terraform:
     name: Validate Terraform
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
-      
+
       - name: Terraform Format Check
         run: terraform fmt -check -recursive terraform/
-      
-      - name: Terraform Init (dev)
-        run: |
-          cd terraform/environments/dev
-          terraform init -backend=false
-      
-      - name: Terraform Validate (dev)
-        run: |
-          cd terraform/environments/dev
-          terraform validate
 
+      - name: Terraform Init (all environments)
+        run: |
+          for env in terraform/environments/*; do
+            if [ -d "$env" ]; then
+              echo "Initializing Terraform in $env"
+              cd "$env"
+              terraform init -backend=false
+              cd -
+            fi
+          done
+
+      - name: Terraform Validate (all environments)
+        run: |
+          for env in terraform/environments/*; do
+            if [ -d "$env" ]; then
+              echo "Validating Terraform in $env"
+              cd "$env"
+              terraform validate
+              cd -
+            fi
+          done
+
+  # ---------------------------------------------------------------------------
+  # Terraform Security Scanning
+  # ---------------------------------------------------------------------------
   security-terraform:
     name: Security Scan Terraform
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Run tfsec
         uses: aquasecurity/tfsec-action@v1.0.0
         with:
           working_directory: terraform/
           soft_fail: true
-      
+
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@master
         with:
@@ -261,29 +310,35 @@ jobs:
           framework: terraform
           soft_fail: true
 
+  # ---------------------------------------------------------------------------
+  # Cost Estimation (Infracost)
+  # ---------------------------------------------------------------------------
   cost-estimate:
     name: Cost Estimate
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Infracost
         uses: infracost/actions/setup@v2
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
-      
+
       - name: Generate Infracost diff
         run: |
           cd terraform/environments/dev
           infracost breakdown --path . --format json --out-file /tmp/infracost.json
-      
+
       - name: Post Infracost comment
         uses: infracost/actions/comment@v1
         with:
           path: /tmp/infracost.json
           behavior: update
 
+  # ---------------------------------------------------------------------------
+  # Aggregated Check Status
+  # ---------------------------------------------------------------------------
   all-checks:
     name: All Checks Passed
     runs-on: ubuntu-latest

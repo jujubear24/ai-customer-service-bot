@@ -1,0 +1,1 @@
+"""response-validator Lambda function."""

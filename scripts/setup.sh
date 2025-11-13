@@ -293,8 +293,8 @@ print_step "Creating ADR template..."
 cat > docs/adr/template.md << 'EOF'
 # ADR-XXX: [Title]
 
-**Date:** YYYY-MM-DD  
-**Status:** [Proposed | Accepted | Deprecated | Superseded]  
+**Date:** YYYY-MM-DD
+**Status:** [Proposed | Accepted | Deprecated | Superseded]
 **Deciders:** [List of people involved]
 
 ## Context

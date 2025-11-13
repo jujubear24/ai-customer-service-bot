@@ -1,0 +1,14 @@
+# AWS SDK
+boto3>=1.35.0
+
+# AWS Lambda Powertools
+aws-lambda-powertools[tracer]>=2.31.0
+
+# Data validation
+pydantic>=2.5.0
+
+# Redis (optional)
+redis>=5.0.0
+
+# Utilities
+python-dateutil>=2.8.0

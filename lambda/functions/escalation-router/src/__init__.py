@@ -1,0 +1,1 @@
+"""escalation-router Lambda function."""

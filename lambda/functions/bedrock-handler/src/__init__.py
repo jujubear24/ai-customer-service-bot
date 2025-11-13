@@ -1,0 +1,1 @@
+"""bedrock-handler Lambda function."""

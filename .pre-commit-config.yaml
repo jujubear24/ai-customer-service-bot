@@ -1,3 +1,33 @@
+# =============================================================================
+# Pre-Commit Configuration
+# =============================================================================
+# This configuration file defines automated checks and linters that run
+# before each commit. It ensures consistent formatting, type safety, and
+# security across the codebase.
+#
+# Project Environment:
+#   This project uses **uv** for environment and dependency management.
+#
+# Setup Instructions:
+#   1. Install pre-commit using uv:
+#        uv tool install pre-commit
+#
+#   2. Install the git hook scripts:
+#        pre-commit install
+#
+#   3. (Optional) Run checks on all files:
+#        pre-commit run --all-files
+#
+# Optional Integrations:
+#   • **VS Code** — You can enable "Run pre-commit on save" via extensions like
+#     “Pre-commit Hooks” or configure “Format on Save” for Ruff and Prettier.
+#
+#   • **CI/CD Pipelines** — Add this step to ensure consistency:
+#        - name: Run pre-commit checks
+#          run: pre-commit run --all-files
+#
+# =============================================================================
+
 repos:
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -15,39 +45,29 @@ repos:
       - id: detect-aws-credentials
         args: [--allow-missing-credentials]
 
-  # Python formatting with Black
-  - repo: https://github.com/psf/black
-    rev: 23.12.1
+  # Python formatting and linting with Ruff (replaces Black, isort, flake8)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.0
     hooks:
-      - id: black
-        language_version: python3.12
-        args: [--line-length=100]
+      # Run the linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^lambda/
+      # Run the formatter (replaces Black)
+      - id: ruff-format
         files: ^lambda/
 
-  # Python import sorting
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
+  # Python type checking with mypy (via our custom script)
+  - repo: local
     hooks:
-      - id: isort
-        args: [--profile=black, --line-length=100]
+      - id: mypy-lambdas
+        name: Mypy Lambda Type Check
+        entry: ./scripts/lint-lambdas.sh
+        language: script
+        # Run this hook if any files under lambda/ change
         files: ^lambda/
-
-  # Python linting with flake8
-  - repo: https://github.com/PyCQA/flake8
-    rev: 7.0.0
-    hooks:
-      - id: flake8
-        args: [--max-line-length=100, --extend-ignore=E203]
-        files: ^lambda/
-
-  # Python type checking with mypy
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
-    hooks:
-      - id: mypy
-        additional_dependencies: []
-        args: [--ignore-missing-imports, --python-version=3.12]
-        files: ^lambda/
+        # The script handles its own file discovery
+        pass_filenames: false
 
   # Terraform formatting
   - repo: https://github.com/antonbabenko/pre-commit-terraform

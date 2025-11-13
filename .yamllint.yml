@@ -2,6 +2,10 @@ extends: default
 
 ignore: |
   .codacy/
+  # Ignore node_modules for web
+  web/node_modules/
+  # Ignore .next build directory
+  web/.next/
 
 rules:
   line-length:
@@ -13,4 +17,4 @@ rules:
     min-spaces-from-content: 1
   document-start: disable
   truthy:
-    allowed-values: ['true', 'false', 'yes', 'no']
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off'] # Added 'on'/'off' for flexibility

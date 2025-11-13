@@ -1,0 +1,1 @@
+"""metrics-publisher Lambda function."""

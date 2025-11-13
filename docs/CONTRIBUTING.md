@@ -1,18 +1,22 @@
 # Contributing Guidelines
 
-Thank you for considering contributing to the AI Customer Service Bot project!
+Thank you for considering contributing to the **AI Customer Service Bot** project!
+
+---
 
 ## 📋 Code of Conduct
 
-- Be respectful and inclusive
-- Provide constructive feedback
-- Focus on the best outcome for the project
+* Be respectful and inclusive
+* Provide constructive feedback
+* Focus on the best outcome for the project
+
+---
 
 ## 🎯 Development Workflow
 
 ### 1. Branch Naming Convention
 
-```
+```markdown
 feature/short-description    # New features
 bugfix/issue-description     # Bug fixes
 hotfix/critical-fix          # Production hotfixes
@@ -22,7 +26,7 @@ refactor/component-name      # Code refactoring
 
 ### 2. Commit Message Format
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
+We follow **Conventional Commits**:
 
 ```bash
 <type>(<scope>): <subject>
@@ -34,17 +38,17 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 **Types:**
 
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Maintenance tasks
+* `feat`: New feature
+* `fix`: Bug fix
+* `docs`: Documentation changes
+* `style`: Code style changes (formatting, etc.)
+* `refactor`: Code refactoring
+* `test`: Adding or updating tests
+* `chore`: Maintenance tasks
 
-**Examples:**
+**Example:**
 
-```bash
+```markdown
 feat(lambda): add sentiment analysis to response validator
 
 Integrated Amazon Comprehend for real-time sentiment detection
@@ -56,11 +60,11 @@ Closes #123
 
 ### 3. Pull Request Process
 
-1. **Create a feature branch** from `main`
-2. **Make your changes** with clear commits
-3. **Write/update tests** (maintain >80% coverage)
-4. **Update documentation** if needed
-5. **Run all checks** locally:
+1. Create a feature branch from `main`
+2. Make your changes with clear commits
+3. Write/update tests (maintain >80% coverage)
+4. Update documentation if needed
+5. Run all checks locally:
 
    ```bash
    make test-all
@@ -68,8 +72,8 @@ Closes #123
    make typecheck
    ```
 
-6. **Create a PR** with a clear description
-7. **Address review feedback** promptly
+6. Create a PR with a clear description
+7. Address review feedback promptly
 
 ### 4. Pull Request Template
 
@@ -99,14 +103,16 @@ Brief description of changes
 - [ ] Tests pass locally
 ```
 
+---
+
 ## 🧪 Testing Guidelines
 
 ### Unit Tests
 
-- Test individual functions in isolation
-- Mock external dependencies (AWS services, etc.)
-- Aim for >80% code coverage
-- Use descriptive test names
+* Test individual functions in isolation
+* Mock external dependencies (AWS services, etc.)
+* Aim for >80% code coverage
+* Use descriptive test names
 
 ```python
 def test_calculate_escalation_score_high_priority_customer():
@@ -122,24 +128,26 @@ def test_calculate_escalation_score_high_priority_customer():
 
 ### Integration Tests
 
-- Test interactions between components
-- Use test AWS resources when possible
-- Clean up resources after tests
+* Test interactions between components
+* Use test AWS resources when possible
+* Clean up resources after tests
 
 ### E2E Tests
 
-- Test complete user workflows
-- Run against staging environment
-- Cover critical paths
+* Test complete user workflows
+* Run against staging environment
+* Cover critical paths
+
+---
 
 ## 💻 Coding Standards
 
 ### Python
 
-- **Style**: PEP 8 with Black formatter
-- **Type hints**: Required for all function signatures
-- **Docstrings**: Google style for all public functions
-- **Max line length**: 100 characters
+* **Style:** PEP 8 with Ruff (replacing Black, isort, flake8)
+* **Type hints:** Required for all function signatures
+* **Docstrings:** Google style for all public functions
+* **Max line length:** 100 characters
 
 ```python
 from typing import Dict, Any, Optional
@@ -150,29 +158,29 @@ def process_message(
 ) -> Dict[str, Any]:
     """
     Process incoming customer message.
-    
+
     Args:
         message: Raw message text from customer
         context: Optional conversation context
-        
+
     Returns:
         Processed message with metadata
-        
+
     Raises:
         ValueError: If message is empty
     """
     if not message.strip():
         raise ValueError("Message cannot be empty")
-    
+
     # Implementation...
 ```
 
 ### TypeScript
 
-- **Style**: ESLint + Prettier
-- **Types**: Explicit types, avoid `any`
-- **Components**: Functional components with hooks
-- **File naming**: PascalCase for components, camelCase for utilities
+* **Style:** ESLint + Prettier
+* **Types:** Explicit types, avoid `any`
+* **Components:** Functional components with hooks
+* **File naming:** PascalCase for components, camelCase for utilities
 
 ```typescript
 interface MessageProps {
@@ -188,10 +196,10 @@ export function Message({ content, role, timestamp }: MessageProps): JSX.Element
 
 ### Terraform
 
-- **Format**: `terraform fmt` before commit
-- **Variables**: Always include descriptions
-- **Outputs**: Document what each output provides
-- **Modules**: Reusable, single-responsibility
+* Run `terraform fmt` before commit
+* **Variables:** Always include descriptions
+* **Outputs:** Document what each output provides
+* **Modules:** Reusable, single-responsibility
 
 ```hcl
 variable "environment" {
@@ -204,53 +212,61 @@ variable "environment" {
 }
 ```
 
+---
+
 ## 📝 Documentation Standards
 
 ### Code Comments
 
-- Explain **why**, not **what**
-- Keep comments up-to-date
-- Use TODO/FIXME for temporary notes
+* Explain **why**, not what
+* Keep comments up-to-date
+* Use TODO/FIXME for temporary notes
 
 ### README Files
 
-- Each major directory should have a README
-- Include purpose, usage, and examples
-- Keep up-to-date with code changes
+* Each major directory should have a README
+* Include purpose, usage, and examples
+* Keep up-to-date with code changes
 
 ### Architecture Decision Records (ADRs)
 
-- Document significant architectural decisions
-- Use the template in `docs/adr/template.md`
-- Number sequentially (001, 002, etc.)
+* Document significant architectural decisions
+* Use the template in `docs/adr/template.md`
+* Number sequentially (001, 002, etc.)
+
+---
 
 ## 🔍 Review Process
 
 ### For Reviewers
 
-- Review within 24-48 hours if possible
-- Be constructive and specific
-- Approve if changes look good
-- Request changes if issues found
+* Review within 24–48 hours if possible
+* Be constructive and specific
+* Approve if changes look good
+* Request changes if issues found
 
 ### For Authors
 
-- Address all comments
-- Mark resolved comments
-- Re-request review after changes
-- Be patient and professional
+* Address all comments
+* Mark resolved comments
+* Re-request review after changes
+* Be patient and professional
+
+---
 
 ## 🚀 Release Process
 
-1. **Version Bump**: Update version in relevant files
-2. **Changelog**: Update CHANGELOG.md
-3. **Tag**: Create git tag `v1.2.3`
-4. **Push**: `git push origin v1.2.3`
-5. **CI/CD**: GitHub Actions handles deployment
+1. **Version Bump:** Update version in relevant files
+2. **Changelog:** Update `CHANGELOG.md`
+3. **Tag:** Create git tag `v1.2.3`
+4. **Push:** `git push origin v1.2.3`
+5. **CI/CD:** GitHub Actions handles deployment
+
+---
 
 ## 🐛 Bug Reports
 
-Use GitHub Issues with the bug template:
+Use GitHub Issues with the **bug** template:
 
 ```markdown
 **Describe the bug**
@@ -271,9 +287,11 @@ If applicable
 - AWS Region: [e.g. us-east-1]
 ```
 
+---
+
 ## 💡 Feature Requests
 
-Use GitHub Issues with the feature template:
+Use GitHub Issues with the **feature** template:
 
 ```markdown
 **Problem Statement**
@@ -289,11 +307,13 @@ What else did you think about?
 Any other relevant information
 ```
 
+---
+
 ## ❓ Questions?
 
-- Create a GitHub Discussion
-- Tag with `question` label
-- Provide context and what you've tried
+* Create a GitHub Discussion
+* Tag with `question` label
+* Provide context and what you've tried
 
 ---
 

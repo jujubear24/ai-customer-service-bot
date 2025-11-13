@@ -2,11 +2,11 @@
 
 ## 📝 Description
 
-Provide a brief description of the changes in this PR 
+Provide a brief description of the changes in this PR
 
 ## 🎯 Type of Change
 
-Mark the relevant option with an 'x' 
+Mark the relevant option with an 'x'
 
 - [ ] 🐛 Bug fix (non-breaking change that fixes an issue)
 - [ ] ✨ New feature (non-breaking change that adds functionality)
@@ -25,7 +25,7 @@ Related to #
 
 ## 🧪 Testing
 
-Describe the tests you ran and how to reproduce them 
+Describe the tests you ran and how to reproduce them
 
 ### Unit Tests
 
@@ -41,7 +41,7 @@ Describe the tests you ran and how to reproduce them
 
 ### Manual Testing
 
-Describe manual testing steps 
+Describe manual testing steps
 
 - [ ] Tested locally
 - [ ] Tested in dev environment
