@@ -2,19 +2,62 @@ extends: default
 
 ignore: |
   .codacy/
-  # Ignore node_modules for web
   web/node_modules/
-  # Ignore .next build directory
   web/.next/
+  .venv/
+  venv/
+  .terraform/
+  **/.terraform/
+  **/node_modules/
+  **/__pycache__/
 
 rules:
+  # Line length - allow longer lines but warn
   line-length:
     max: 120
     level: warning
+
+  # Indentation - 2 spaces for YAML
   indentation:
     spaces: 2
+    indent-sequences: consistent
+
+  # Comments formatting
   comments:
     min-spaces-from-content: 1
+
+  # Allow files without document start marker (---)
   document-start: disable
+
+  # Boolean values - be flexible with truthy values
   truthy:
-    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off'] # Added 'on'/'off' for flexibility
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: false  # Don't enforce on mapping keys
+
+  # Allow duplicate keys in some cases (e.g., anchors/aliases)
+  key-duplicates: enable
+
+  # Trailing spaces - error level
+  trailing-spaces: enable
+
+  # Empty lines
+  empty-lines:
+    max: 2
+
+  # New line at end of file
+  new-line-at-end-of-file: enable
+
+  # Bracket spacing
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+
+  # Brace spacing for inline objects
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Octal values - warn about implicit octals
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: false
