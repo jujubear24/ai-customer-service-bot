@@ -31,7 +31,7 @@
 repos:
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -47,7 +47,7 @@ repos:
 
   # Python formatting and linting with Ruff (replaces Black, isort, flake8)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.3.0
+    rev: v0.8.4
     hooks:
       # Run the linter
       - id: ruff
@@ -113,3 +113,9 @@ repos:
       - id: prettier
         types_or: [javascript, jsx, ts, tsx, json, markdown, yaml]
         files: ^web/
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.0.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]

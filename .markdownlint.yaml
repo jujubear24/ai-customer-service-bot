@@ -1,3 +1,101 @@
-# Terraform docs generate long lines and HTML anchors
-MD013: false  # Disable line length check
-MD033: false  # Allow inline HTML
+# Markdownlint Configuration
+# Enforces consistent Markdown formatting across documentation
+
+# Extend the default configuration
+default: true
+
+# Line length - disabled for auto-generated Terraform docs
+MD013:
+  # Set to false to completely disable, or configure:
+  line_length: 120  # Allow longer lines
+  # Alternative: false to disable completely
+  # Terraform docs generate long lines we can't control
+
+# Inline HTML - allow for Terraform docs anchors
+MD033: false  # Terraform docs use <a name="..."> anchors
+
+# Trailing spaces - allow 2 spaces for line breaks in Markdown
+MD009:
+  br_spaces: 2  # Allow 2 trailing spaces for <br>
+  list_item_empty_lines: false
+  strict: false
+
+# Multiple consecutive blank lines
+MD012:
+  maximum: 2  # Allow up to 2 blank lines
+
+# Line length for code blocks
+MD040: true  # Require language specification in fenced code blocks
+
+# Bare URLs - allow for convenience
+MD034: false  # Allow bare URLs without angle brackets
+
+# First line heading - enforce for consistency
+MD041: true  # First line should be a top-level heading
+
+# Proper names - enforce capitalization
+MD044:
+  names:
+    - JavaScript
+    - TypeScript
+    - GitHub
+    - GitLab
+    - AWS
+    - Terraform
+    - Python
+    - Docker
+    - Kubernetes
+  code_blocks: false  # Don't check inside code blocks
+
+# Emphasis style - enforce consistent bold/italic
+MD049:
+  style: "asterisk"  # Use *italic* and **bold** (not _underscore_)
+
+MD050:
+  style: "asterisk"  # Use **bold** consistently
+
+# Heading style
+MD003:
+  style: "atx"  # Use # headings (not underlined with ===)
+
+# Unordered list style
+MD004:
+  style: "dash"  # Use - for lists (not * or +)
+
+# Ordered list item prefix
+MD029:
+  style: "ordered"  # Use 1. 2. 3. (not all 1. 1. 1.)
+
+# Blanks around headings
+MD022:
+  lines_above: 1
+  lines_below: 1
+
+# Blanks around fences
+MD031: true  # Require blank lines around fenced code blocks
+
+MD032: true  # Require blank lines around lists
+
+# Multiple headings with same content
+MD024:
+  siblings_only: true  # Allow same heading text in different sections
+
+# Headings increment by one level
+MD001: true  # Don't skip heading levels (no # then ###)
+
+# Commands show dollar signs
+MD014: false  # Allow dollar signs in code blocks (for shell examples)
+
+# No missing space after hash on atx style heading
+MD018: true  # Require space after # in headings
+
+# No multiple spaces after hash on atx style heading
+MD019: true  # No multiple spaces after #
+
+# Heading punctuation
+MD026:
+  punctuation: ".,;:!"  # Don't end headings with these
+
+# Code fence style
+MD048:
+  style: "backtick"  # Use ``` not ~~~
