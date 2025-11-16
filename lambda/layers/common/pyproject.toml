@@ -1,0 +1,10 @@
+# lambda/layers/common/pyproject.toml
+[project]
+name = "shared-layer"
+version = "0.1.0"
+dependencies = [
+    "boto3>=1.35.0",
+    "aws-lambda-powertools[tracer]>=2.31.0",
+    "pydantic>=2.5.0",
+    "redis>=5.0.0",
+]

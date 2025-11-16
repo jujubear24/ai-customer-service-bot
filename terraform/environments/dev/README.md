@@ -1,12 +1,12 @@
 # dev
 
-<!-- BEGINNING OF PRE-COMMIT-TERRAFORM DOCS HOOK -->
+<!-- BEGINNING OF PRE-COMMIT-Terraform DOCS HOOK -->
 ## Requirements
 
 | Name | Version |
 |------|---------|
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.6.0 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 5.0 |
+| <a name="requirement_terraform"></a> [Terraform](#requirement\_terraform) | >= 1.6.0 |
+| <a name="requirement_aws"></a> [AWS](#requirement\_aws) | ~> 5.0 |
 
 ## Providers
 
@@ -29,7 +29,7 @@ No resources.
 |------|-------------|------|---------|:--------:|
 | <a name="input_alert_email"></a> [alert\_email](#input\_alert\_email) | Email address for budget and operational alerts | `string` | n/a | yes |
 | <a name="input_availability_zones"></a> [availability\_zones](#input\_availability\_zones) | A list of availability zones for the VPC | `list(string)` | n/a | yes |
-| <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | The AWS region for this environment | `string` | n/a | yes |
+| <a name="input_aws_region"></a> [AWS\_region](#input\_aws\_region) | The AWS region for this environment | `string` | n/a | yes |
 | <a name="input_common_tags"></a> [common\_tags](#input\_common\_tags) | A map of common tags to apply to all resources | `map(string)` | `{}` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | The name of the environment (e.g., dev, staging, prod) | `string` | n/a | yes |
 | <a name="input_private_subnet_cidrs"></a> [private\_subnet\_cidrs](#input\_private\_subnet\_cidrs) | A list of CIDR blocks for private subnets | `list(string)` | n/a | yes |
@@ -40,4 +40,4 @@ No resources.
 ## Outputs
 
 No outputs.
-<!-- END OF PRE-COMMIT-TERRAFORM DOCS HOOK -->
+<!-- END OF PRE-COMMIT-Terraform DOCS HOOK -->

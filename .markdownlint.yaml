@@ -4,11 +4,11 @@
 # Extend the default configuration
 default: true
 
-# Line length - disabled for auto-generated Terraform docs
+# Line length - relaxed for auto-generated Terraform docs
 MD013:
-  # Set to false to completely disable, or configure:
-  line_length: 120  # Allow longer lines
-  # Alternative: false to disable completely
+  line_length: 150  # Increased from 120 to accommodate Terraform docs
+  tables: false  # Don't check tables (Terraform generates wide tables)
+  code_blocks: false  # Don't check code blocks
   # Terraform docs generate long lines we can't control
 
 # Inline HTML - allow for Terraform docs anchors
