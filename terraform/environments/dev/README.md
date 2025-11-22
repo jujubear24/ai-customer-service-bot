@@ -1,43 +1,80 @@
-# dev
+# Dev Environment
 
-<!-- BEGINNING OF PRE-COMMIT-Terraform DOCS HOOK -->
-## Requirements
+This is the development environment configuration for the AI Customer Service Bot project.
 
-| Name | Version |
-|------|---------|
-| <a name="requirement_terraform"></a> [Terraform](#requirement\_terraform) | >= 1.6.0 |
-| <a name="requirement_aws"></a> [AWS](#requirement\_aws) | ~> 5.0 |
+## Overview
 
-## Providers
+This environment includes:
 
-No providers.
+- VPC with public and private subnets across 2 availability zones
+- NAT Gateway for private subnet internet access
+- CloudWatch logging and monitoring
+- Budget alerts and cost tracking
+- Synthetics canary for health checks
 
-## Modules
+## Usage
 
-| Name | Source | Version |
-|------|--------|---------|
-| <a name="module_networking"></a> [networking](#module\_networking) | ../../modules/networking | n/a |
-| <a name="module_observability"></a> [observability](#module\_observability) | ../../modules/observability | n/a |
+### Initialize
+
+```bash
+cd terraform/environments/dev
+terraform init
+```
+
+### Plan Changes
+
+```bash
+terraform plan
+```
+
+### Apply Changes
+
+```bash
+terraform apply
+```
+
+### View Outputs
+
+```bash
+terraform output
+```
+
+## Configuration
+
+Edit `terraform.tfvars` to customize:
+
+- VPC CIDR blocks
+- Subnet configurations
+- Budget limits
+- Alert email addresses
+- Tags
 
 ## Resources
 
-No resources.
+This environment creates the following resources:
 
-## Inputs
+- **Networking Module**: VPC, subnets, NAT gateway, internet gateway, route tables, security groups
+- **Observability Module**: CloudWatch log groups, dashboards, alarms, SNS topics, budgets, synthetics canary
 
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| <a name="input_alert_email"></a> [alert\_email](#input\_alert\_email) | Email address for budget and operational alerts | `string` | n/a | yes |
-| <a name="input_availability_zones"></a> [availability\_zones](#input\_availability\_zones) | A list of availability zones for the VPC | `list(string)` | n/a | yes |
-| <a name="input_aws_region"></a> [AWS\_region](#input\_aws\_region) | The AWS region for this environment | `string` | n/a | yes |
-| <a name="input_common_tags"></a> [common\_tags](#input\_common\_tags) | A map of common tags to apply to all resources | `map(string)` | `{}` | no |
-| <a name="input_environment"></a> [environment](#input\_environment) | The name of the environment (e.g., dev, staging, prod) | `string` | n/a | yes |
-| <a name="input_private_subnet_cidrs"></a> [private\_subnet\_cidrs](#input\_private\_subnet\_cidrs) | A list of CIDR blocks for private subnets | `list(string)` | n/a | yes |
-| <a name="input_project_name"></a> [project\_name](#input\_project\_name) | The name of the project | `string` | n/a | yes |
-| <a name="input_public_subnet_cidrs"></a> [public\_subnet\_cidrs](#input\_public\_subnet\_cidrs) | A list of CIDR blocks for public subnets | `list(string)` | n/a | yes |
-| <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | n/a | yes |
+For detailed module documentation, see:
+
+- [Networking Module](../../modules/networking/README.md)
+- [Observability Module](../../modules/observability/README.md)
 
 ## Outputs
 
-No outputs.
-<!-- END OF PRE-COMMIT-Terraform DOCS HOOK -->
+After deployment, you can view outputs with:
+
+```bash
+terraform output
+```
+
+Available outputs:
+
+- `vpc_id` - The ID of the VPC
+- `private_subnet_ids` - List of private subnet IDs
+- `public_subnet_ids` - List of public subnet IDs
+- `default_security_group_id` - The ID of the default security group
+- `sns_topic_arn` - The ARN of the SNS alerting topic
+- `cloudwatch_kms_key_arn` - The ARN of the KMS key used for CloudWatch logs
+- `canary_name` - Name of the heartbeat canary

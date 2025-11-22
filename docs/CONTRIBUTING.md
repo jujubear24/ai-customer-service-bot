@@ -6,9 +6,9 @@ Thank you for considering contributing to the **AI Customer Service Bot** projec
 
 ## 📋 Code of Conduct
 
-* Be respectful and inclusive
-* Provide constructive feedback
-* Focus on the best outcome for the project
+- Be respectful and inclusive
+- Provide constructive feedback
+- Focus on the best outcome for the project
 
 ---
 
@@ -38,13 +38,13 @@ We follow **Conventional Commits**:
 
 **Types:**
 
-* `feat`: New feature
-* `fix`: Bug fix
-* `docs`: Documentation changes
-* `style`: Code style changes (formatting, etc.)
-* `refactor`: Code refactoring
-* `test`: Adding or updating tests
-* `chore`: Maintenance tasks
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation changes
+- `style`: Code style changes (formatting, etc.)
+- `refactor`: Code refactoring
+- `test`: Adding or updating tests
+- `chore`: Maintenance tasks
 
 **Example:**
 
@@ -109,10 +109,10 @@ Brief description of changes
 
 ### Unit Tests
 
-* Test individual functions in isolation
-* Mock external dependencies (AWS services, etc.)
-* Aim for >80% code coverage
-* Use descriptive test names
+- Test individual functions in isolation
+- Mock external dependencies (AWS services, etc.)
+- Aim for >80% code coverage
+- Use descriptive test names
 
 ```python
 def test_calculate_escalation_score_high_priority_customer():
@@ -128,15 +128,15 @@ def test_calculate_escalation_score_high_priority_customer():
 
 ### Integration Tests
 
-* Test interactions between components
-* Use test AWS resources when possible
-* Clean up resources after tests
+- Test interactions between components
+- Use test AWS resources when possible
+- Clean up resources after tests
 
 ### E2E Tests
 
-* Test complete user workflows
-* Run against staging environment
-* Cover critical paths
+- Test complete user workflows
+- Run against staging environment
+- Cover critical paths
 
 ---
 
@@ -144,10 +144,10 @@ def test_calculate_escalation_score_high_priority_customer():
 
 ### Python
 
-* **Style:** PEP 8 with Ruff (replacing Black, isort, flake8)
-* **Type hints:** Required for all function signatures
-* **Docstrings:** Google style for all public functions
-* **Max line length:** 100 characters
+- **Style:** PEP 8 with Ruff (replacing Black, isort, flake8)
+- **Type hints:** Required for all function signatures
+- **Docstrings:** Google style for all public functions
+- **Max line length:** 100 characters
 
 ```python
 from typing import Dict, Any, Optional
@@ -177,10 +177,10 @@ def process_message(
 
 ### TypeScript
 
-* **Style:** ESLint + Prettier
-* **Types:** Explicit types, avoid `any`
-* **Components:** Functional components with hooks
-* **File naming:** PascalCase for components, camelCase for utilities
+- **Style:** ESLint + Prettier
+- **Types:** Explicit types, avoid `any`
+- **Components:** Functional components with hooks
+- **File naming:** PascalCase for components, camelCase for utilities
 
 ```typescript
 interface MessageProps {
@@ -196,10 +196,10 @@ export function Message({ content, role, timestamp }: MessageProps): JSX.Element
 
 ### Terraform
 
-* Run `terraform fmt` before commit
-* **Variables:** Always include descriptions
-* **Outputs:** Document what each output provides
-* **Modules:** Reusable, single-responsibility
+- Run `terraform fmt` before commit
+- **Variables:** Always include descriptions
+- **Outputs:** Document what each output provides
+- **Modules:** Reusable, single-responsibility
 
 ```hcl
 variable "environment" {
@@ -218,21 +218,21 @@ variable "environment" {
 
 ### Code Comments
 
-* Explain **why**, not what
-* Keep comments up-to-date
-* Use TODO/FIXME for temporary notes
+- Explain **why**, not what
+- Keep comments up-to-date
+- Use TODO/FIXME for temporary notes
 
 ### README Files
 
-* Each major directory should have a README
-* Include purpose, usage, and examples
-* Keep up-to-date with code changes
+- Each major directory should have a README
+- Include purpose, usage, and examples
+- Keep up-to-date with code changes
 
 ### Architecture Decision Records (ADRs)
 
-* Document significant architectural decisions
-* Use the template in `docs/adr/template.md`
-* Number sequentially (001, 002, etc.)
+- Document significant architectural decisions
+- Use the template in `docs/adr/template.md`
+- Number sequentially (001, 002, etc.)
 
 ---
 
@@ -240,17 +240,17 @@ variable "environment" {
 
 ### For Reviewers
 
-* Review within 24–48 hours if possible
-* Be constructive and specific
-* Approve if changes look good
-* Request changes if issues found
+- Review within 24–48 hours if possible
+- Be constructive and specific
+- Approve if changes look good
+- Request changes if issues found
 
 ### For Authors
 
-* Address all comments
-* Mark resolved comments
-* Re-request review after changes
-* Be patient and professional
+- Address all comments
+- Mark resolved comments
+- Re-request review after changes
+- Be patient and professional
 
 ---
 
@@ -311,9 +311,9 @@ Any other relevant information
 
 ## ❓ Questions?
 
-* Create a GitHub Discussion
-* Tag with `question` label
-* Provide context and what you've tried
+- Create a GitHub Discussion
+- Tag with `question` label
+- Provide context and what you've tried
 
 ---
 

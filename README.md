@@ -8,12 +8,12 @@ A **production-grade, AI-powered customer service platform** built on AWS with *
 
 This project demonstrates advanced **cloud engineering** and **AI/ML integration** for customer service automation using:
 
-* **AI/ML:** Amazon Bedrock (Claude 3.5 Sonnet), Knowledge Bases for RAG, Amazon Comprehend
-* **Orchestration:** AWS Step Functions, EventBridge, SQS
-* **Data:** DynamoDB with DAX, ElastiCache Redis, OpenSearch
-* **Frontend:** Next.js 14, TypeScript, Tailwind CSS, shadcn/ui
-* **Infrastructure:** Terraform, GitHub Actions CI/CD
-* **Observability:** CloudWatch, X-Ray, custom metrics
+- **AI/ML:** Amazon Bedrock (Claude 3.5 Sonnet), Knowledge Bases for RAG, Amazon Comprehend
+- **Orchestration:** AWS Step Functions, EventBridge, SQS
+- **Data:** DynamoDB with DAX, ElastiCache Redis, OpenSearch
+- **Frontend:** Next.js 14, TypeScript, Tailwind CSS, shadcn/ui
+- **Infrastructure:** Terraform, GitHub Actions CI/CD
+- **Observability:** CloudWatch, X-Ray, custom metrics
 
 ---
 
@@ -287,10 +287,10 @@ This project is licensed under the **MIT License** — see the [`LICENSE`](LICEN
 
 ## 🙏 Acknowledgments
 
-* AWS Documentation & Best Practices
-* Anthropic Claude API
-* Terraform AWS Modules Community
-* Next.js Team
+- AWS Documentation & Best Practices
+- Anthropic Claude API
+- Terraform AWS Modules Community
+- Next.js Team
 
 ---
 

@@ -4,7 +4,7 @@
 terraform {
   backend "s3" {
     # This bucket name must match the one created by backend_bootstrap
-    bucket = "ai-customer-service-bot-terraform-state-288232812020"
+    bucket = "ai-customer-service-bot-terraform-state-907808569721"
 
     key    = "dev/terraform.tfstate"
     region = "us-east-1"
