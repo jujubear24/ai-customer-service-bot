@@ -40,3 +40,27 @@ output "canary_name" {
   description = "Name of the heartbeat canary"
   value       = module.observability.canary_name
 }
+
+# ==============================================================================
+# Lambda Outputs
+# ==============================================================================
+
+output "shared_layer_arn" {
+  description = "ARN of the shared Lambda layer"
+  value       = module.lambda.shared_layer_arn
+}
+
+output "intent_classifier_function_name" {
+  description = "Name of the intent-classifier Lambda function"
+  value       = module.lambda.intent_classifier_function_name
+}
+
+output "intent_classifier_function_arn" {
+  description = "ARN of the intent-classifier Lambda function"
+  value       = module.lambda.intent_classifier_function_arn
+}
+
+output "intent_classifier_invoke_arn" {
+  description = "Invoke ARN for API Gateway integration"
+  value       = module.lambda.intent_classifier_invoke_arn
+}

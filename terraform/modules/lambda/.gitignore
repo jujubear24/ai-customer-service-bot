@@ -1,0 +1,9 @@
+# Terraform build artifacts
+builds/
+*.zip
+
+# Terraform state
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup

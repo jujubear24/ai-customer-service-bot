@@ -77,9 +77,8 @@ repos:
       - id: terraform_validate
       - id: terraform_docs
         args:
-          - --hook-config=--path-to-file=README.md
-          - --hook-config=--add-to-existing-file=true
-          - --hook-config=--create-file-if-not-exist=true
+          - --args=--lockfile=false
+
         # Only run on module directories, not environments
         files: ^terraform/modules/.*\.tf$
       - id: terraform_tflint

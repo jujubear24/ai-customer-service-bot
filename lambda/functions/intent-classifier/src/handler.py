@@ -1,6 +1,6 @@
 """Main handler for intent-classifier Lambda function."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -10,7 +10,16 @@ from shared.exceptions import LambdaError, ValidationError
 from shared.metrics import MetricUnit, metrics
 from shared.types import LambdaResponse
 from shared.utils import format_response, get_correlation_id, parse_json_body
-from src.classifier import classify_intent
+
+# Import classifier from same directory (not from src package)
+if TYPE_CHECKING:
+    from src.classifier import classify_intent
+else:
+    try:
+        from classifier import classify_intent
+    except ImportError:
+        # Fallback for local testing where src is a package
+        from src.classifier import classify_intent
 
 # Initialize
 config = Config.from_env()

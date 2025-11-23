@@ -49,3 +49,18 @@ module "observability" {
 
   common_tags = var.common_tags
 }
+
+# ==============================================================================
+# Lambda Functions
+# ==============================================================================
+
+module "lambda" {
+  source = "../../modules/lambda"
+
+  project_name      = var.project_name
+  environment       = var.environment
+  log_level         = var.log_level
+  metrics_namespace = "CustomerServiceBot"
+
+  common_tags = var.common_tags
+}
