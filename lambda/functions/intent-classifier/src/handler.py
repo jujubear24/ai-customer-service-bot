@@ -1,6 +1,5 @@
 """Main handler for intent-classifier Lambda function."""
 
-import json
 from typing import Any
 
 from aws_lambda_powertools import Logger, Tracer
@@ -10,7 +9,8 @@ from shared.config import Config
 from shared.exceptions import LambdaError, ValidationError
 from shared.metrics import MetricUnit, metrics
 from shared.types import LambdaResponse
-from shared.utils import format_response, get_correlation_id
+from shared.utils import format_response, get_correlation_id, parse_json_body
+from src.classifier import classify_intent
 
 # Initialize
 config = Config.from_env()
@@ -23,38 +23,57 @@ tracer = Tracer(service="intent-classifier")
 @metrics.log_metrics
 def lambda_handler(event: dict[str, Any], context: LambdaContext) -> LambdaResponse:
     """
-    Main Lambda handler function.
+    Main Lambda handler function for intent classification.
 
-    Args:
-        event: Lambda event object
-        context: Lambda context object
+    Expected input (API Gateway):
+    {
+        "body": {
+            "message": "I need to speak to a manager",
+            "conversation_history": []  // Optional
+        }
+    }
 
     Returns:
-        Response dictionary with statusCode, headers, and body
+        Response with classified intent, confidence, and entities
     """
     correlation_id = get_correlation_id(event)
 
-    logger.info("Processing event for intent-classifier", extra={"correlation_id": correlation_id})
+    logger.info(
+        "Processing intent classification request", extra={"correlation_id": correlation_id}
+    )
 
     # Add custom metric
     metrics.add_metric(name="FunctionInvocation", unit=MetricUnit.Count, value=1)
 
     try:
-        # Validate input
-        validate_event(event)
+        # Parse and validate input
+        body = parse_json_body(event.get("body"))
+        message, conversation_history = validate_and_extract_input(body)
 
-        # Process event
-        result = process_event(event, context)
+        # Classify intent
+        classification = classify_intent(message, conversation_history)
 
-        logger.info("Successfully processed event", extra={"correlation_id": correlation_id})
+        logger.info(
+            "Successfully classified intent",
+            extra={
+                "correlation_id": correlation_id,
+                "intent": classification.intent,
+                "confidence": classification.confidence,
+            },
+        )
 
-        metrics.add_metric(name="SuccessfulProcessing", unit=MetricUnit.Count, value=1)
+        metrics.add_metric(name="SuccessfulClassification", unit=MetricUnit.Count, value=1)
+        metrics.add_metric(
+            name=f"Intent_{classification.intent}",
+            unit=MetricUnit.Count,
+            value=1,
+        )
 
         return format_response(
             200,
             {
-                "message": "Success",
-                "data": result,
+                "message": "Intent classified successfully",
+                "classification": classification.model_dump(),
                 "correlation_id": correlation_id,
             },
         )
@@ -100,40 +119,42 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> LambdaRespo
 
 
 @tracer.capture_method
-def validate_event(event: dict[str, Any]) -> None:
+def validate_and_extract_input(body: dict[str, Any]) -> tuple[str, list[dict[str, Any]] | None]:
     """
-    Validate incoming event.
+    Validate incoming request body and extract required fields.
 
     Args:
-        event: Lambda event object
-
-    Raises:
-        ValidationError: If event is invalid
-    """
-    # TODO: Implement validation logic specific to intent-classifier
-    if not event:
-        raise ValidationError("Event cannot be empty")
-
-
-@tracer.capture_method
-def process_event(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
-    """
-    Process the incoming event.
-
-    Args:
-        event: Lambda event object
-        context: Lambda context object
+        body: Parsed request body
 
     Returns:
-        Processed result dictionary
-    """
-    # TODO: Implement your business logic here
-    logger.debug(f"Processing event: {json.dumps(event)}")
+        Tuple of (message, conversation_history)
 
-    return {
-        "function": "intent-classifier",
-        "request_id": context.aws_request_id if hasattr(context, "aws_request_id") else None,
-        "remaining_time_ms": context.get_remaining_time_in_millis()
-        if hasattr(context, "get_remaining_time_in_millis")
-        else None,
-    }
+    Raises:
+        ValidationError: If validation fails
+    """
+    if not body:
+        raise ValidationError("Request body cannot be empty")
+
+    # Extract and validate message
+    message = body.get("message", "").strip()
+    if not message:
+        raise ValidationError("'message' field is required and cannot be empty")
+
+    if len(message) > 2000:
+        raise ValidationError("'message' exceeds maximum length of 2000 characters")
+
+    # Extract optional conversation history
+    conversation_history = body.get("conversation_history")
+    if conversation_history is not None:
+        if not isinstance(conversation_history, list):
+            raise ValidationError("'conversation_history' must be an array")
+
+        if len(conversation_history) > 50:
+            raise ValidationError("'conversation_history' exceeds maximum of 50 messages")
+
+    logger.debug(
+        f"Validated input - message length: {len(message)}, "
+        f"history length: {len(conversation_history) if conversation_history else 0}"
+    )
+
+    return message, conversation_history
