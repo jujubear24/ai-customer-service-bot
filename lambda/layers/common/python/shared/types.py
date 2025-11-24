@@ -25,7 +25,15 @@ class ConversationContext(BaseModel):
 class IntentClassification(BaseModel):
     """Result of intent classification."""
 
-    intent: Literal["greeting", "question", "complaint", "request", "escalation"]
+    intent: Literal[
+        "greeting",
+        "question",
+        "complaint",
+        "request",
+        "escalation",
+        "shipping",
+        "technical_support",
+    ]
     confidence: float = Field(ge=0.0, le=1.0)
     entities: dict[str, str] = Field(default_factory=dict)
     requires_context: bool = False

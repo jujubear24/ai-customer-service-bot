@@ -64,3 +64,29 @@ module "lambda" {
 
   common_tags = var.common_tags
 }
+
+# ==============================================================================
+# API Gateway
+# ==============================================================================
+
+module "api_gateway" {
+  source = "../../modules/api_gateway"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  # Lambda function details
+  intent_classifier_function_name = module.lambda.intent_classifier_function_name
+  intent_classifier_invoke_arn    = module.lambda.intent_classifier_invoke_arn
+
+  # CloudWatch configuration
+  log_retention_days     = 7
+  cloudwatch_kms_key_arn = module.observability.cloudwatch_kms_key_arn
+  api_logging_level      = "INFO"
+
+  # Throttling
+  throttle_burst_limit = 100
+  throttle_rate_limit  = 50
+
+  common_tags = var.common_tags
+}

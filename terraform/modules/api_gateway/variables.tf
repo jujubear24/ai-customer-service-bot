@@ -1,0 +1,78 @@
+# ==============================================================================
+# Project Configuration
+# ==============================================================================
+
+variable "project_name" {
+  description = "The name of the project"
+  type        = string
+}
+
+variable "environment" {
+  description = "The name of the environment"
+  type        = string
+}
+
+# ==============================================================================
+# Lambda Configuration
+# ==============================================================================
+
+variable "intent_classifier_function_name" {
+  description = "Name of the intent-classifier Lambda function"
+  type        = string
+}
+
+variable "intent_classifier_invoke_arn" {
+  description = "Invoke ARN of the intent-classifier Lambda function"
+  type        = string
+}
+
+# ==============================================================================
+# CloudWatch Configuration
+# ==============================================================================
+
+variable "log_retention_days" {
+  description = "Number of days to retain API Gateway logs"
+  type        = number
+  default     = 14
+}
+
+variable "cloudwatch_kms_key_arn" {
+  description = "ARN of KMS key for CloudWatch log encryption"
+  type        = string
+}
+
+variable "api_logging_level" {
+  description = "API Gateway logging level (INFO, ERROR, OFF)"
+  type        = string
+  default     = "INFO"
+  validation {
+    condition     = contains(["INFO", "ERROR", "OFF"], var.api_logging_level)
+    error_message = "API logging level must be one of: INFO, ERROR, OFF"
+  }
+}
+
+# ==============================================================================
+# Throttling Configuration
+# ==============================================================================
+
+variable "throttle_burst_limit" {
+  description = "API Gateway throttle burst limit"
+  type        = number
+  default     = 100
+}
+
+variable "throttle_rate_limit" {
+  description = "API Gateway throttle rate limit (requests per second)"
+  type        = number
+  default     = 50
+}
+
+# ==============================================================================
+# Tagging
+# ==============================================================================
+
+variable "common_tags" {
+  description = "Common tags for all resources"
+  type        = map(string)
+  default     = {}
+}

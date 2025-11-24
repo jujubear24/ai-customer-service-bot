@@ -64,3 +64,17 @@ output "intent_classifier_invoke_arn" {
   description = "Invoke ARN for API Gateway integration"
   value       = module.lambda.intent_classifier_invoke_arn
 }
+
+# ==============================================================================
+# API Gateway Outputs
+# ==============================================================================
+
+output "api_endpoint" {
+  description = "Base URL of the API Gateway"
+  value       = module.api_gateway.api_endpoint
+}
+
+output "classify_intent_endpoint" {
+  description = "Full URL for the classify-intent endpoint"
+  value       = module.api_gateway.classify_intent_endpoint
+}

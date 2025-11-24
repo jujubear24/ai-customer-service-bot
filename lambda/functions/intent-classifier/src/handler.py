@@ -11,20 +11,23 @@ from shared.metrics import MetricUnit, metrics
 from shared.types import LambdaResponse
 from shared.utils import format_response, get_correlation_id, parse_json_body
 
-# Import classifier from same directory (not from src package)
+# Import classifier - use TYPE_CHECKING to satisfy mypy
 if TYPE_CHECKING:
-    from src.classifier import classify_intent
+    from src.classifier import IntentClassifier
 else:
     try:
-        from classifier import classify_intent
+        from classifier import IntentClassifier
     except ImportError:
         # Fallback for local testing where src is a package
-        from src.classifier import classify_intent
+        from src.classifier import IntentClassifier
 
 # Initialize
 config = Config.from_env()
 logger = Logger(service="intent-classifier")
 tracer = Tracer(service="intent-classifier")
+
+# Initialize classifier once (reuse across invocations)
+classifier = IntentClassifier()
 
 
 @logger.inject_lambda_context
@@ -59,8 +62,8 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> LambdaRespo
         body = parse_json_body(event.get("body"))
         message, conversation_history = validate_and_extract_input(body)
 
-        # Classify intent
-        classification = classify_intent(message, conversation_history)
+        # Classify intent (only pass message, not conversation_history)
+        classification = classifier.classify(message)
 
         logger.info(
             "Successfully classified intent",
