@@ -1,5 +1,7 @@
 """Common type definitions using Pydantic."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -9,15 +11,44 @@ from pydantic import BaseModel, Field
 LambdaResponse = dict[str, Any]
 
 
-class ConversationContext(BaseModel):
-    """Context maintained across conversation turns."""
+class MessageContext(BaseModel):
+    """Message context for conversation history."""
 
+    message_id: str
+    role: str  # USER, ASSISTANT, SYSTEM
+    content: str
+    timestamp: str
+    intent: str | None = None
+    entities: dict[str, str] | None = None
+    sentiment: str | None = None
+
+
+class ConversationContext(BaseModel):
+    """Unified conversation context model (merged from both earlier versions)."""
+
+    # Core identifiers
     conversation_id: str
-    tenant_id: str
-    user_id: str
-    session_id: str
-    message_history: list[dict[str, Any]] = Field(default_factory=list)
+    user_id: str | None = None
+    tenant_id: str | None = None
+    session_id: str | None = None
+
+    # Structured message history
+    messages: list[MessageContext] = Field(default_factory=list)
+
+    # Metadata and extra contextual info
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # Runtime metrics
+    total_messages: int = 0
+    estimated_tokens: int = 0
+    is_truncated: bool = False
+
+    # Conversation-level state
+    status: str = "ACTIVE"  # e.g. ACTIVE, CLOSED
+    last_intent: str | None = None
+    sentiment_score: float | None = None
+
+    # Audit timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -60,3 +91,20 @@ class EscalationTicket(BaseModel):
     sentiment: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     priority: str = "medium"
+
+
+class ContextBuilderRequest(BaseModel):
+    """Request to build conversation context."""
+
+    conversation_id: str
+    include_system_prompt: bool = True
+    max_messages: int | None = None
+    max_tokens: int | None = None
+
+
+class ContextBuilderResponse(BaseModel):
+    """Response from context builder."""
+
+    conversation_id: str
+    context: ConversationContext
+    timestamp: str

@@ -1,4 +1,4 @@
-"""Custom exception classes."""
+"""Custom exception classes for Lambda functions."""
 
 
 class LambdaError(Exception):
@@ -23,6 +23,10 @@ class ExternalServiceError(LambdaError):
     """Raised when external service call fails."""
 
     pass
+
+
+# Alias for backward compatibility
+DependencyError = ExternalServiceError
 
 
 class BedrockError(ExternalServiceError):

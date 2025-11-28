@@ -1,57 +1,33 @@
-#
-# This is the main entrypoint for the 'dev' environment.
-# It consumes reusable modules from /terraform/modules.
-#
+# Note: terraform{} and provider{} blocks are in versions.tf
 
 # ==============================================================================
-# Core Networking
+# Local Variables
 # ==============================================================================
 
-module "networking" {
-  source = "../../modules/networking"
-
-  project_name = var.project_name
-  environment  = var.environment
-
-  vpc_cidr             = var.vpc_cidr
-  availability_zones   = var.availability_zones
-  private_subnet_cidrs = var.private_subnet_cidrs
-  public_subnet_cidrs  = var.public_subnet_cidrs
-
+locals {
   common_tags = var.common_tags
 }
 
 # ==============================================================================
-# Observability
+# DynamoDB Module
 # ==============================================================================
 
-module "observability" {
-  source = "../../modules/observability"
+module "dynamodb" {
+  source = "../../modules/dynamodb"
 
-  project_name = var.project_name
-  environment  = var.environment
+  environment                   = var.environment
+  table_name                    = "conversations"
+  billing_mode                  = "PAY_PER_REQUEST"
+  stream_enabled                = true
+  enable_point_in_time_recovery = false
+  enable_alarms                 = true
+  alarm_sns_topic_arn           = null
 
-  # The list of lambdas we plan to build in Phase 1
-  lambda_functions = [
-    "intent-classifier",
-    "context-builder",
-    "bedrock-handler",
-    "response-validator",
-    "escalation-router",
-    "metrics-publisher"
-  ]
-
-  log_retention_days = 7 # Keep dev logs for 7 days to save costs
-
-  # Budget Configuration
-  budget_amount = "25"              # Set to $25 as requested
-  alert_emails  = [var.alert_email] # Pass the email from tfvars
-
-  common_tags = var.common_tags
+  tags = local.common_tags
 }
 
 # ==============================================================================
-# Lambda Functions
+# Lambda Module
 # ==============================================================================
 
 module "lambda" {
@@ -60,13 +36,43 @@ module "lambda" {
   project_name      = var.project_name
   environment       = var.environment
   log_level         = var.log_level
-  metrics_namespace = "CustomerServiceBot"
+  metrics_namespace = var.metrics_namespace
+  common_tags       = local.common_tags
 
-  common_tags = var.common_tags
+  functions = {
+    intent-classifier = {
+      handler               = "handler.lambda_handler"
+      runtime               = "python3.12"
+      timeout               = 30
+      memory_size           = 256
+      environment_variables = {}
+      enable_xray           = true
+      # Explicitly empty lists are fine
+      additional_layers            = []
+      additional_policy_arns       = []
+      additional_policy_statements = []
+    }
+
+    context-builder = {
+      handler     = "handler.handler"
+      runtime     = "python3.12"
+      timeout     = 30
+      memory_size = 512
+      environment_variables = {
+        TABLE_NAME   = module.dynamodb.table_name
+        MAX_MESSAGES = "10"
+        MAX_TOKENS   = "8000"
+      }
+      enable_xray                  = true
+      additional_layers            = []
+      additional_policy_arns       = [module.dynamodb.iam_policy_arn]
+      additional_policy_statements = []
+    }
+  }
 }
 
 # ==============================================================================
-# API Gateway
+# API Gateway Module
 # ==============================================================================
 
 module "api_gateway" {
@@ -75,18 +81,45 @@ module "api_gateway" {
   project_name = var.project_name
   environment  = var.environment
 
-  # Lambda function details
-  intent_classifier_function_name = module.lambda.intent_classifier_function_name
+
   intent_classifier_invoke_arn    = module.lambda.intent_classifier_invoke_arn
+  intent_classifier_function_name = module.lambda.intent_classifier_function_name
 
-  # CloudWatch configuration
+
   log_retention_days     = 7
-  cloudwatch_kms_key_arn = module.observability.cloudwatch_kms_key_arn
   api_logging_level      = "INFO"
+  cloudwatch_kms_key_arn = null
 
-  # Throttling
   throttle_burst_limit = 100
   throttle_rate_limit  = 50
 
-  common_tags = var.common_tags
+
+
+
+
+
+  common_tags = local.common_tags
+}
+
+# ==============================================================================
+# Observability Module
+# ==============================================================================
+
+module "observability" {
+  source = "../../modules/observability"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  lambda_functions = [
+    module.lambda.intent_classifier_function_name,
+    module.lambda.context_builder_function_name,
+  ]
+
+  log_retention_days = 7
+  budget_amount      = "20"
+  alert_emails       = [var.alert_email]
+
+  common_tags = local.common_tags
+  api_url     = module.api_gateway.api_endpoint
 }

@@ -340,13 +340,13 @@ resource "aws_synthetics_canary" "heartbeat" {
   start_canary         = true
 
   schedule {
-    expression = "rate(5 minutes)"
+    expression = "cron(0 */12 * * ? *)"
   }
 
   run_config {
     timeout_in_seconds = 60
     environment_variables = {
-      API_URL = "https://api.example.com" # Placeholder until we have the real API Gateway URL
+      API_URL = var.api_url
     }
   }
 

@@ -12,6 +12,16 @@ output "api_arn" {
   value       = aws_api_gateway_rest_api.main.arn
 }
 
+output "api_name" {
+  description = "Name of the API Gateway REST API"
+  value       = aws_api_gateway_rest_api.main.name
+}
+
+output "execution_arn" {
+  description = "Execution ARN of the API Gateway REST API (for Lambda permissions)"
+  value       = aws_api_gateway_rest_api.main.execution_arn
+}
+
 output "api_endpoint" {
   description = "Base URL of the API Gateway"
   value       = aws_api_gateway_stage.main.invoke_url

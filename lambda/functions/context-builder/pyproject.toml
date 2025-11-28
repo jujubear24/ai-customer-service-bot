@@ -1,7 +1,7 @@
 [project]
 name = "context-builder"
 version = "0.1.0"
-description = "Lambda function for context-builder"
+description = "Lambda function for building conversation context from DynamoDB"
 requires-python = ">=3.12"
 dependencies = [
     "boto3>=1.35.0",
@@ -24,6 +24,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+pythonpath = [".", "../../layers/common/python"]
 addopts = "--cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=80"
 
 [tool.coverage.run]

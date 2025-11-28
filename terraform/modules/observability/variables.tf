@@ -55,3 +55,11 @@ variable "common_tags" {
   type        = map(string)
   default     = {}
 }
+
+# ==============================================================================
+# Tagging
+# ==============================================================================
+variable "api_url" {
+  description = "The base URL of the API Gateway endpoint used by the heartbeat canary"
+  type        = string
+}

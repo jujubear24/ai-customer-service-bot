@@ -15,14 +15,10 @@ terraform {
 }
 
 # ==============================================================================
-# Data Sources
-# ==============================================================================
-
-
-# ==============================================================================
 # REST API Gateway
 # ==============================================================================
 
+# Creates to-level API, which is the container for all routes.
 resource "aws_api_gateway_rest_api" "main" {
   name        = "${var.project_name}-api-${var.environment}"
   description = "AI Customer Service Bot API - ${var.environment}"

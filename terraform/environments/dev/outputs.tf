@@ -1,68 +1,24 @@
 # ==============================================================================
-# Networking Outputs
+# DynamoDB Outputs
 # ==============================================================================
 
-output "vpc_id" {
-  description = "The ID of the VPC"
-  value       = module.networking.vpc_id
-}
-
-output "private_subnet_ids" {
-  description = "List of private subnet IDs"
-  value       = module.networking.private_subnet_ids
-}
-
-output "public_subnet_ids" {
-  description = "List of public subnet IDs"
-  value       = module.networking.public_subnet_ids
-}
-
-output "default_security_group_id" {
-  description = "The ID of the default security group"
-  value       = module.networking.default_security_group_id
-}
-
-# ==============================================================================
-# Observability Outputs
-# ==============================================================================
-
-output "sns_topic_arn" {
-  description = "The ARN of the SNS alerting topic"
-  value       = module.observability.sns_topic_arn
-}
-
-output "cloudwatch_kms_key_arn" {
-  description = "The ARN of the KMS key used for CloudWatch logs"
-  value       = module.observability.cloudwatch_kms_key_arn
-}
-
-output "canary_name" {
-  description = "Name of the heartbeat canary"
-  value       = module.observability.canary_name
+output "dynamodb_table_name" {
+  description = "The name of the DynamoDB table"
+  value       = module.dynamodb.table_name
 }
 
 # ==============================================================================
 # Lambda Outputs
 # ==============================================================================
 
-output "shared_layer_arn" {
-  description = "ARN of the shared Lambda layer"
-  value       = module.lambda.shared_layer_arn
-}
-
 output "intent_classifier_function_name" {
-  description = "Name of the intent-classifier Lambda function"
+  description = "Name of the intent classifier Lambda function"
   value       = module.lambda.intent_classifier_function_name
 }
 
-output "intent_classifier_function_arn" {
-  description = "ARN of the intent-classifier Lambda function"
-  value       = module.lambda.intent_classifier_function_arn
-}
-
-output "intent_classifier_invoke_arn" {
-  description = "Invoke ARN for API Gateway integration"
-  value       = module.lambda.intent_classifier_invoke_arn
+output "context_builder_function_name" {
+  description = "Name of the context builder Lambda function"
+  value       = module.lambda.context_builder_function_name
 }
 
 # ==============================================================================
@@ -70,11 +26,35 @@ output "intent_classifier_invoke_arn" {
 # ==============================================================================
 
 output "api_endpoint" {
-  description = "Base URL of the API Gateway"
+  description = "The base URL for the API Gateway"
   value       = module.api_gateway.api_endpoint
 }
 
-output "classify_intent_endpoint" {
-  description = "Full URL for the classify-intent endpoint"
-  value       = module.api_gateway.classify_intent_endpoint
+output "api_name" {
+  description = "The name of the API Gateway"
+  value       = module.api_gateway.api_name
+}
+
+output "api_execution_arn" {
+  description = "The execution ARN of the API Gateway"
+  value       = module.api_gateway.execution_arn
+}
+
+# ==============================================================================
+# Observability Outputs
+# ==============================================================================
+
+output "cloudwatch_log_groups" {
+  description = "List of CloudWatch Log Groups created for Lambdas"
+  value       = module.observability.log_group_names
+}
+
+output "cloudwatch_log_group_arns" {
+  description = "List of CloudWatch Log Group ARNs"
+  value       = module.observability.log_group_arns
+}
+
+output "cloudwatch_dashboard_name" {
+  description = "Name of the main CloudWatch dashboard"
+  value       = module.observability.dashboard_name
 }

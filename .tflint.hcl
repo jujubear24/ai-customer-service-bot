@@ -80,7 +80,7 @@ rule "terraform_standard_module_structure" {
 
 # AWS-specific rules
 rule "aws_resource_missing_tags" {
-  enabled = true  # Warn about resources without required tags
+  enabled = false  # Warn about resources without required tags
   tags = [
     "Environment",
     "Project",

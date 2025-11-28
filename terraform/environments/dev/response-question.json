@@ -1,1 +1,0 @@
-{"statusCode": 200, "headers": {"Content-Type": "application/json", "X-Timestamp": "2025-11-23T16:49:52.755646"}, "body": "{\"message\": \"Intent classified successfully\", \"classification\": {\"intent\": \"question\", \"confidence\": 0.7, \"entities\": {}, \"requires_context\": false}, \"correlation_id\": \"\"}"}
