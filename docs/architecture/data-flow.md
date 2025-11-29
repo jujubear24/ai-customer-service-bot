@@ -154,8 +154,8 @@ erDiagram
     USER ||--o{ CONVERSATION : has
 
     CONVERSATION {
-        string pk "CONV#{conversation_id}"
-        string sk "METADATA"
+        string pk PK
+        string sk SK
         string conversation_id
         string user_id
         string status
@@ -165,8 +165,8 @@ erDiagram
     }
 
     MESSAGE {
-        string pk "CONV#{conversation_id}"
-        string sk "MSG#{timestamp}#{message_id}"
+        string pk FK
+        string sk SK
         string message_id
         string role
         string content
@@ -175,13 +175,18 @@ erDiagram
     }
 
     USER {
-        string pk "USER#{user_id}"
-        string sk "PROFILE"
+        string pk PK
+        string sk SK
         string email
         int total_conversations
     }
-
 ```
+
+**Key Patterns:**
+
+- `CONVERSATION`: pk = `CONV#{conversation_id}`, sk = `METADATA`
+- `MESSAGE`: pk = `CONV#{conversation_id}`, sk = `MSG#{timestamp}#{message_id}`
+- `USER`: pk = `USER#{user_id}`, sk = `PROFILE`
 
 ### Access Pattern Flows
 
