@@ -154,8 +154,8 @@ erDiagram
     USER ||--o{ CONVERSATION : has
 
     CONVERSATION {
-        string pk PK
-        string sk SK
+        string pk
+        string sk
         string conversation_id
         string user_id
         string status
@@ -165,8 +165,8 @@ erDiagram
     }
 
     MESSAGE {
-        string pk FK
-        string sk SK
+        string pk
+        string sk
         string message_id
         string role
         string content
@@ -175,8 +175,8 @@ erDiagram
     }
 
     USER {
-        string pk PK
-        string sk SK
+        string pk
+        string sk
         string email
         int total_conversations
     }
