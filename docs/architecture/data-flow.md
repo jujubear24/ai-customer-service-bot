@@ -154,8 +154,8 @@ erDiagram
     USER ||--o{ CONVERSATION : has
 
     CONVERSATION {
-        string pk
-        string sk
+        string partition_key
+        string sort_key
         string conversation_id
         string user_id
         string status
@@ -165,8 +165,8 @@ erDiagram
     }
 
     MESSAGE {
-        string pk
-        string sk
+        string partition_key
+        string sort_key
         string message_id
         string role
         string content
@@ -175,8 +175,8 @@ erDiagram
     }
 
     USER {
-        string pk
-        string sk
+        string partition_key
+        string sort_key
         string email
         int total_conversations
     }
@@ -184,9 +184,9 @@ erDiagram
 
 **Key Patterns:**
 
-- `CONVERSATION`: pk = `CONV#{conversation_id}`, sk = `METADATA`
-- `MESSAGE`: pk = `CONV#{conversation_id}`, sk = `MSG#{timestamp}#{message_id}`
-- `USER`: pk = `USER#{user_id}`, sk = `PROFILE`
+- `CONVERSATION`: partition_key = `CONV#{conversation_id}`, sort_key = `METADATA`
+- `MESSAGE`: partition_key = `CONV#{conversation_id}`, sort_key = `MSG#{timestamp}#{message_id}`
+- `USER`: partition_key = `USER#{user_id}`, sort_key = `PROFILE`
 
 ### Access Pattern Flows
 
