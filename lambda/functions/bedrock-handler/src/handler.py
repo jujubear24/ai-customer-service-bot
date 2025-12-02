@@ -1,139 +1,189 @@
-"""Main handler for bedrock-handler Lambda function."""
+"""
+Bedrock Handler Lambda Function.
+
+Invokes Amazon Bedrock Claude models to generate AI responses.
+Stateless design for Step Functions compatibility (ADR-009).
+"""
 
 import json
+import os
+from datetime import UTC, datetime
 from typing import Any
 
-from aws_lambda_powertools import Logger, Tracer
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from pydantic import ValidationError
 
-from shared.config import Config
-from shared.exceptions import LambdaError, ValidationError
-from shared.metrics import MetricUnit, metrics
-from shared.types import LambdaResponse
-from shared.utils import format_response, get_correlation_id
+from bedrock_client import BedrockClient, BedrockClientError, BedrockModelError
+from prompt_builder import build_messages_payload, build_system_prompt
+from shared.exceptions import DependencyError
+from shared.exceptions import ValidationError as CustomValidationError
+from shared.types import BedrockRequest, BedrockResponse
 
-# Initialize
-config = Config.from_env()
-logger = Logger(service="bedrock-handler")
-tracer = Tracer(service="bedrock-handler")
+# Initialize Powertools
+logger = Logger()
+tracer = Tracer()
+metrics = Metrics()
+
+# Environment variables
+MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
+DEFAULT_MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "1024"))
+DEFAULT_TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.7"))
+
+# Initialize Bedrock client
+bedrock_client = BedrockClient(model_id=MODEL_ID)
+
+
+@tracer.capture_method
+def process_request(request: BedrockRequest) -> BedrockResponse:
+    """Process a Bedrock request and return response.
+
+    Args:
+        request: Validated BedrockRequest.
+
+    Returns:
+        BedrockResponse with AI-generated content.
+    """
+    # Build system prompt
+    system_prompt = build_system_prompt(
+        include_guidelines=True,
+        include_safety=True,
+        custom_instructions=request.system_prompt_override,
+    )
+
+    # Build messages array
+    messages = build_messages_payload(
+        user_message=request.user_message,
+        conversation_context=request.conversation_context,
+        intent=request.intent,
+        entities=request.entities,
+        rag_context=request.rag_context,
+    )
+
+    # Log request details (without PII)
+    logger.info(
+        "Invoking Bedrock model",
+        extra={
+            "conversation_id": request.conversation_id,
+            "model_id": MODEL_ID,
+            "message_count": len(messages),
+            "max_tokens": request.max_tokens,
+            "has_rag_context": request.rag_context is not None,
+        },
+    )
+
+    # Invoke model
+    result = bedrock_client.invoke_model(
+        messages=messages,
+        system_prompt=system_prompt,
+        max_tokens=request.max_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+    )
+
+    # Record metrics
+    metrics.add_metric(name="BedrockInvocations", unit=MetricUnit.Count, value=1)
+    metrics.add_metric(
+        name="BedrockInputTokens", unit=MetricUnit.Count, value=result["input_tokens"]
+    )
+    metrics.add_metric(
+        name="BedrockOutputTokens", unit=MetricUnit.Count, value=result["output_tokens"]
+    )
+    metrics.add_metric(
+        name="BedrockLatency", unit=MetricUnit.Milliseconds, value=result["latency_ms"]
+    )
+
+    # Build response
+    response = BedrockResponse(
+        conversation_id=request.conversation_id,
+        response_text=result["response_text"],
+        model_id=result["model_id"],
+        input_tokens=result["input_tokens"],
+        output_tokens=result["output_tokens"],
+        latency_ms=result["latency_ms"],
+        stop_reason=result["stop_reason"],
+        timestamp=datetime.now(UTC).isoformat(),
+        request_id=result.get("request_id"),
+    )
+
+    logger.info(
+        "Bedrock invocation successful",
+        extra={
+            "conversation_id": request.conversation_id,
+            "input_tokens": result["input_tokens"],
+            "output_tokens": result["output_tokens"],
+            "latency_ms": result["latency_ms"],
+            "stop_reason": result["stop_reason"],
+        },
+    )
+
+    return response
 
 
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
-@metrics.log_metrics
-def lambda_handler(event: dict[str, Any], context: LambdaContext) -> LambdaResponse:
-    """
-    Main Lambda handler function.
+@metrics.log_metrics(capture_cold_start_metric=True)
+def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
+    """Lambda handler for Bedrock invocation.
 
     Args:
-        event: Lambda event object
-        context: Lambda context object
+        event: Lambda event (BedrockRequest as dict).
+        context: Lambda context.
 
     Returns:
-        Response dictionary with statusCode, headers, and body
+        BedrockResponse as dict, or error response.
     """
-    correlation_id = get_correlation_id(event)
-
-    logger.info("Processing event for bedrock-handler", extra={"correlation_id": correlation_id})
-
-    # Add custom metric
-    metrics.add_metric(name="FunctionInvocation", unit=MetricUnit.Count, value=1)
-
     try:
-        # Validate input
-        validate_event(event)
+        # Parse and validate request
+        try:
+            request = BedrockRequest.model_validate(event)
+        except ValidationError as e:
+            logger.error("Request validation failed", extra={"errors": e.errors()})
+            raise CustomValidationError(f"Invalid request: {str(e)}") from e
 
-        # Process event
-        result = process_event(event, context)
+        # Process request
+        response = process_request(request)
 
-        logger.info("Successfully processed event", extra={"correlation_id": correlation_id})
+        # Return response as dict
+        return response.model_dump(mode="json")
 
-        metrics.add_metric(name="SuccessfulProcessing", unit=MetricUnit.Count, value=1)
+    except CustomValidationError as e:
+        logger.error("Validation error", extra={"error": str(e)})
+        metrics.add_metric(name="BedrockValidationErrors", unit=MetricUnit.Count, value=1)
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Validation error", "details": str(e)}),
+        }
 
-        return format_response(
-            200,
-            {
-                "message": "Success",
-                "data": result,
-                "correlation_id": correlation_id,
-            },
-        )
+    except BedrockModelError as e:
+        logger.error("Model error", extra={"error": str(e)})
+        metrics.add_metric(name="BedrockModelErrors", unit=MetricUnit.Count, value=1)
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Model error", "details": str(e)}),
+        }
 
-    except ValidationError as e:
-        logger.warning(f"Validation error: {str(e)}", exc_info=True)
-        metrics.add_metric(name="ValidationError", unit=MetricUnit.Count, value=1)
+    except BedrockClientError as e:
+        logger.error("Bedrock client error", extra={"error": str(e)})
+        metrics.add_metric(name="BedrockThrottles", unit=MetricUnit.Count, value=1)
+        return {
+            "statusCode": 429,
+            "body": json.dumps({"error": "Service throttled", "details": str(e)}),
+        }
 
-        return format_response(
-            400,
-            {
-                "error": "ValidationError",
-                "message": str(e),
-                "correlation_id": correlation_id,
-            },
-        )
+    except DependencyError as e:
+        logger.error("Dependency error", extra={"error": str(e)})
+        metrics.add_metric(name="BedrockDependencyErrors", unit=MetricUnit.Count, value=1)
+        return {
+            "statusCode": 502,
+            "body": json.dumps({"error": "Dependency error", "details": str(e)}),
+        }
 
-    except LambdaError as e:
-        logger.error(f"Lambda error: {str(e)}", exc_info=True)
-        metrics.add_metric(name="LambdaError", unit=MetricUnit.Count, value=1)
-
-        return format_response(
-            500,
-            {
-                "error": type(e).__name__,
-                "message": str(e),
-                "correlation_id": correlation_id,
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        metrics.add_metric(name="UnexpectedError", unit=MetricUnit.Count, value=1)
-
-        return format_response(
-            500,
-            {
-                "error": "InternalServerError",
-                "message": "An unexpected error occurred",
-                "correlation_id": correlation_id,
-            },
-        )
-
-
-@tracer.capture_method
-def validate_event(event: dict[str, Any]) -> None:
-    """
-    Validate incoming event.
-
-    Args:
-        event: Lambda event object
-
-    Raises:
-        ValidationError: If event is invalid
-    """
-    # TODO: Implement validation logic specific to bedrock-handler
-    if not event:
-        raise ValidationError("Event cannot be empty")
-
-
-@tracer.capture_method
-def process_event(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
-    """
-    Process the incoming event.
-
-    Args:
-        event: Lambda event object
-        context: Lambda context object
-
-    Returns:
-        Processed result dictionary
-    """
-    # TODO: Implement your business logic here
-    logger.debug(f"Processing event: {json.dumps(event)}")
-
-    return {
-        "function": "bedrock-handler",
-        "request_id": context.aws_request_id if hasattr(context, "aws_request_id") else None,
-        "remaining_time_ms": context.get_remaining_time_in_millis()
-        if hasattr(context, "get_remaining_time_in_millis")
-        else None,
-    }
+    except Exception:
+        logger.exception("Unexpected error")
+        metrics.add_metric(name="BedrockUnexpectedErrors", unit=MetricUnit.Count, value=1)
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": "Internal server error"}),
+        }

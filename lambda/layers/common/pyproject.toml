@@ -7,4 +7,6 @@ dependencies = [
     "aws-lambda-powertools[tracer]>=2.31.0",
     "pydantic>=2.5.0",
     "redis>=5.0.0",
+    "tenacity>=8.2.0"
+
 ]
