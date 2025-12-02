@@ -9,16 +9,17 @@
 ## Context
 
 The AI Customer Service Bot requires integration with Amazon Bedrock to generate AI-powered responses for customer inquiries.
-The Bedrock Handler Lambda will receive conversation context and produce natural language responses using Claude 3.5 Sonnet.
+The Bedrock Handler Lambda will receive conversation context and produce natural language responses using Claude Haiku 4.5.
 
 **Key requirements driving the design:**
 
 1. **Stateless Execution**: Handler must integrate cleanly with future Step Functions orchestration (Phase 4)
 2. **Cost Efficiency**: Select model with optimal price/performance ratio for customer service use cases
-3. **Reliability**: Graceful handling of throttling, timeouts, and service errors
-4. **Prompt Management**: Maintainable, version-controlled prompt construction
-5. **Observability**: Token usage tracking for cost attribution and capacity planning
-6. **Security**: Least-privilege IAM permissions for Bedrock model access
+3. **Low Latency**: Customer service requires fast response times
+4. **Reliability**: Graceful handling of throttling, timeouts, and service errors
+5. **Prompt Management**: Maintainable, version-controlled prompt construction
+6. **Observability**: Token usage tracking for cost attribution and capacity planning
+7. **Security**: Least-privilege IAM permissions for Bedrock model access
 
 ---
 
@@ -26,13 +27,26 @@ The Bedrock Handler Lambda will receive conversation context and produce natural
 
 ### Model Selection
 
-Adopt **Claude 3.5 Sonnet v2** (`anthropic.claude-3-5-sonnet-20241022-v2:0`) as the foundation model.
+Adopt **Claude Haiku 4.5** (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) as the foundation model.
 
-| Model | Input (per 1M tokens) | Output (per 1M tokens) | Rationale |
-|-------|----------------------|------------------------|-----------|
-| Claude 3.5 Sonnet v2 | $3.00 | $15.00 | Best price/performance for customer service |
-| Claude 3.5 Haiku | $0.80 | $4.00 | Faster but less capable for nuanced queries |
-| Claude 3 Opus | $15.00 | $75.00 | Overkill; unnecessary cost for this use case |
+| Model | Model ID | Input (per 1M) | Output (per 1M) | Rationale |
+|-------|----------|----------------|-----------------|-----------|
+| **Claude Haiku 4.5** | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | ~$1.00 | ~$5.00 | ⭐ Fastest, most cost-effective, designed for customer service |
+| Claude Sonnet 4 | `us.anthropic.claude-sonnet-4-20250514-v1:0` | $3.00 | $15.00 | More capable but 3x cost |
+| Claude Sonnet 4.5 | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | $3.00 | $15.00 | Best for complex coding/agents |
+| ~~Claude 3.5 Sonnet v2~~ | — | — | — | ❌ Legacy model |
+
+**Why Claude Haiku 4.5:**
+
+- **Speed**: Fastest response times in the Claude 4.5 family — critical for customer service chatbots
+- **Cost**: Most cost-effective option (~$1/$5 vs $3/$15 for Sonnet)
+- **Capability**: Matches Claude Sonnet 4 performance on agent tasks and customer service use cases
+- **Design Fit**: Anthropic specifically optimized Haiku 4.5 for "customer service agents and chatbots where response time is critical"
+
+**Note on Model ID Format:**
+
+Newer Bedrock models require a regional prefix. For us-east-1, use `us.anthropic.claude-haiku-4-5-20251001-v1:0`.
+Without the prefix, Bedrock returns a `ValidationException`.
 
 ### Stateless Handler Pattern
 
@@ -187,7 +201,7 @@ Least-privilege policy restricting access to the specific model:
       "Effect": "Allow",
       "Action": ["bedrock:InvokeModel"],
       "Resource": [
-        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0"
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
       ]
     }
   ]
@@ -200,6 +214,8 @@ Least-privilege policy restricting access to the specific model:
 
 ### Positive
 
+- **Fast Response Times**: Haiku 4.5 provides lowest latency in the Claude 4.5 family
+- **Cost Efficient**: ~70% cheaper than Sonnet models ($1/$5 vs $3/$15 per 1M tokens)
 - **Decoupled Architecture**: Bedrock Handler can be tested, deployed, and scaled independently of storage concerns
 - **Cost Visibility**: Token metrics enable accurate cost attribution per conversation
 - **Zero Prompt Dependencies**: Python f-strings require no external libraries
@@ -215,8 +231,8 @@ Least-privilege policy restricting access to the specific model:
 
 ### Neutral
 
-- **Model Lock-in**: Tightly coupled to Claude message format; mitigated by abstracting via `bedrock_client.py`
-- **Future Flexibility**: If non-engineers need to edit prompts, can migrate to Jinja2 or AWS Bedrock Prompt Management
+- **Model Capability**: Haiku 4.5 may produce slightly less nuanced responses than Sonnet on edge cases; monitor escalation rates
+- **Future Flexibility**: Can upgrade to Sonnet 4 if complex queries require stronger reasoning; model ID is configurable via environment variable
 
 ---
 
@@ -238,20 +254,21 @@ Python f-strings handle variable substitution, conditionals, and loops (for RAG 
 Jinja2's value emerges when non-engineers need to edit prompts or when managing 10+ prompt variants — neither applies currently.
 Can be adopted later if requirements change.
 
-### Option 3: Claude 3.5 Haiku for Lower Cost
+### Option 3: Claude Sonnet 4 / Sonnet 4.5 for Stronger Reasoning
 
-Use Haiku ($0.80/$4.00 per 1M tokens) instead of Sonnet ($3.00/$15.00).
+Use Sonnet ($3/$15 per 1M tokens) instead of Haiku (~$1/$5).
 
-**Why not chosen:** Customer service requires nuanced understanding of context, intent, and tone.
-Haiku's reduced capability increases risk of poor responses requiring escalation. Sonnet provides better first-contact resolution,
-which offsets the higher per-token cost with fewer escalations.
+**Why not chosen:** Customer service queries are typically straightforward — order status, FAQs, basic troubleshooting.
+Haiku 4.5 matches Sonnet 4 on agent tasks and is specifically optimized for customer service chatbots.
+The 3x cost increase isn't justified for this use case. Can upgrade to Sonnet if escalation analysis shows Haiku struggling.
 
-### Option 4: AWS Bedrock Prompt Management
+### Option 4: Claude 3.5 Sonnet v2 (Legacy)
 
-Store and version prompts in AWS Bedrock console using Prompt Management feature.
+Use the previous generation Claude 3.5 Sonnet v2 model.
 
-**Why not chosen:** Adds AWS console dependency for prompt changes. Harder to test locally and integrate with CI/CD.
-Better suited for teams where non-engineers manage prompts via UI. Can be evaluated for future phases if team structure changes.
+**Why not chosen:** Model is now legacy with "Extended Access" status. The Claude 4.5 family offers better performance,
+and Haiku 4.5 specifically matches or exceeds Claude 3.5 Sonnet capabilities at a fraction of the cost.
+Using current-generation models ensures longer support runway.
 
 ### Option 5: No Retry Logic (Fail Fast)
 
@@ -265,7 +282,8 @@ Exponential backoff with 3 retries handles most transient issues transparently. 
 ## References
 
 - [Amazon Bedrock Pricing](https://aws.amazon.com/bedrock/pricing/)
-- [Anthropic Claude Messages API](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)
+- [Anthropic Claude on Bedrock](https://aws.amazon.com/bedrock/claude/)
+- [Claude Haiku 4.5 Announcement](https://aws.amazon.com/about-aws/whats-new/2025/10/claude-4-5-haiku-anthropic-amazon-bedrock/)
 - [ADR-008: DynamoDB Schema Design](./008-dynamodb-schema-design.md)
 - Implementation: `lambda/functions/bedrock-handler/src/handler.py`
 - Infrastructure: `terraform/modules/bedrock/main.tf`

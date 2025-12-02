@@ -27,6 +27,31 @@ module "dynamodb" {
 }
 
 # ==============================================================================
+# Bedrock Module
+# ==============================================================================
+
+module "bedrock" {
+  source = "../../modules/bedrock"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  # Default model: Claude 3.5 Sonnet v2
+  allowed_model_ids = ["us.anthropic.claude-haiku-4-5-20251001-v1:0"]
+
+  # Streaming disabled for now (can enable for Phase 6 frontend)
+  enable_streaming = false
+
+  # Alarms disabled for dev (enable in prod)
+  enable_alarms       = false
+  alarm_sns_topic_arn = null
+
+  metrics_namespace = var.metrics_namespace
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
 # Lambda Module
 # ==============================================================================
 
@@ -68,6 +93,23 @@ module "lambda" {
       additional_policy_arns       = [module.dynamodb.iam_policy_arn]
       additional_policy_statements = []
     }
+    bedrock-handler = {
+      handler     = "handler.handler"
+      runtime     = "python3.12"
+      timeout     = 60 # Higher timeout for Bedrock calls
+      memory_size = 512
+      environment_variables = {
+        BEDROCK_MODEL_ID = module.bedrock.primary_model_id # us.anthropic.claude-haiku-4-5-20251001-v1:0
+        MAX_TOKENS       = "1024"
+        TEMPERATURE      = "0.7"
+      }
+      enable_xray                  = true
+      additional_layers            = []
+      additional_policy_arns       = [module.bedrock.invoke_policy_arn]
+      additional_policy_statements = []
+    }
+
+
   }
 }
 
@@ -114,6 +156,7 @@ module "observability" {
   lambda_functions = [
     module.lambda.intent_classifier_function_name,
     module.lambda.context_builder_function_name,
+    module.lambda.bedrock_handler_function_name,
   ]
 
   log_retention_days = 7

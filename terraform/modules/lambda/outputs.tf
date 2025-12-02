@@ -54,12 +54,17 @@ output "context_builder_function_name" {
   value       = try(aws_lambda_function.this["context-builder"].function_name, null)
 }
 
-output "context_builder_function_arn" {
-  description = "Context Builder function ARN"
-  value       = try(aws_lambda_function.this["context-builder"].arn, null)
+output "bedrock_handler_function_name" {
+  description = "Name of the Bedrock Handler Lambda function"
+  value       = try(aws_lambda_function.this["bedrock-handler"].function_name, null)
 }
 
-output "context_builder_invoke_arn" {
-  description = "Context Builder function invoke ARN"
-  value       = try(aws_lambda_function.this["context-builder"].invoke_arn, null)
+output "bedrock_handler_function_arn" {
+  description = "ARN of the Bedrock Handler Lambda function"
+  value       = try(aws_lambda_function.this["bedrock-handler"].arn, null)
+}
+
+output "bedrock_handler_invoke_arn" {
+  description = "Invoke ARN of the Bedrock Handler Lambda function"
+  value       = try(aws_lambda_function.this["bedrock-handler"].invoke_arn, null)
 }
