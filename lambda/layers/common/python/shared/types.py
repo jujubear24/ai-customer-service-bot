@@ -70,14 +70,81 @@ class IntentClassification(BaseModel):
     requires_context: bool = False
 
 
-class BedrockRequest(BaseModel):
-    """Standardized Bedrock request wrapper."""
+# =============================================================================
+# Bedrock Models (ADR-009)
+# =============================================================================
 
-    prompt: str
-    conversation_context: ConversationContext | None = None
-    max_tokens: int = 1000
-    temperature: float = 0.7
-    system_prompts: list[str] = Field(default_factory=list)
+
+class BedrockRequest(BaseModel):
+    """Request payload for Bedrock Handler Lambda.
+
+    This model represents the input to the Bedrock Handler, containing
+    the user message, conversation context, and inference parameters.
+    """
+
+    # Required fields
+    conversation_id: str = Field(..., description="Unique conversation identifier")
+    user_message: str = Field(..., description="Current user message to respond to")
+
+    # Context from upstream Lambdas
+    conversation_context: ConversationContext | None = Field(
+        default=None, description="Conversation history from Context Builder"
+    )
+    intent: str | None = Field(default=None, description="Classified intent from Intent Classifier")
+    entities: dict[str, str] | None = Field(
+        default=None, description="Extracted entities from Intent Classifier"
+    )
+
+    # RAG context (Phase 2.2)
+    rag_context: list[str] | None = Field(
+        default=None, description="Retrieved documents from Knowledge Base"
+    )
+
+    # Inference parameters
+    max_tokens: int = Field(default=1024, ge=1, le=4096, description="Maximum tokens in response")
+    temperature: float = Field(default=0.7, ge=0.0, le=1.0, description="Sampling temperature")
+    top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Nucleus sampling parameter")
+
+    # Optional overrides
+    system_prompt_override: str | None = Field(
+        default=None, description="Override default system prompt"
+    )
+
+
+class BedrockResponse(BaseModel):
+    """Response payload from Bedrock Handler Lambda.
+
+    This model represents the output from the Bedrock Handler, containing
+    the AI-generated response and associated metadata for observability.
+    """
+
+    # Core response
+    conversation_id: str = Field(..., description="Conversation identifier (echo from request)")
+    response_text: str = Field(..., description="AI-generated response text")
+
+    # Model information
+    model_id: str = Field(..., description="Bedrock model ID used for inference")
+
+    # Token usage (for cost tracking)
+    input_tokens: int = Field(..., ge=0, description="Number of input tokens consumed")
+    output_tokens: int = Field(..., ge=0, description="Number of output tokens generated")
+
+    # Performance metrics
+    latency_ms: int = Field(..., ge=0, description="End-to-end invocation latency in milliseconds")
+
+    # Response metadata
+    stop_reason: str = Field(
+        ..., description="Reason for response completion (e.g., end_turn, max_tokens)"
+    )
+    timestamp: str = Field(..., description="ISO 8601 timestamp of response generation")
+
+    # Optional fields for debugging/observability
+    request_id: str | None = Field(default=None, description="AWS request ID for tracing")
+
+
+# =============================================================================
+# Escalation Models
+# =============================================================================
 
 
 class EscalationTicket(BaseModel):
@@ -91,6 +158,11 @@ class EscalationTicket(BaseModel):
     sentiment: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     priority: str = "medium"
+
+
+# =============================================================================
+# Context Builder Models
+# =============================================================================
 
 
 class ContextBuilderRequest(BaseModel):
