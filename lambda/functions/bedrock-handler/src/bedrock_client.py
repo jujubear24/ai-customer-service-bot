@@ -94,6 +94,7 @@ class BedrockClient:
         wait=wait_exponential(multiplier=1, min=1, max=10) + wait_random(0, 1),
         stop=stop_after_attempt(3),
         before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
     )
     def invoke_model(
         self,
