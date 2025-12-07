@@ -1,6 +1,6 @@
 # ADR-009: Bedrock Integration Architecture
 
-**Date:** 2025-01-XX (Update with actual date)
+**Date:** 2025-11-30
 **Status:** Accepted
 **Deciders:** Senior Cloud Architect, Development Team
 
