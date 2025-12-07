@@ -83,9 +83,9 @@ if [ "$BUILD_FUNCTIONS" = true ]; then
     LAMBDA_FUNCTIONS=(
         "intent-classifier"
         "context-builder"
+        "bedrock-handler"
         # Add more functions here as you build them:
         # "context-builder"
-        # "bedrock-handler"
         # "response-validator"
     )
 

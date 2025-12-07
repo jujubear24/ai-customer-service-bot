@@ -15,7 +15,7 @@ terraform {
 # Data Sources
 # ==============================================================================
 
-data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
 
 # ==============================================================================
 # Local Variables
@@ -23,14 +23,28 @@ data "aws_region" "current" {}
 
 locals {
   # Build model ARNs for the specified models
-  # Foundation models use a special ARN format without account ID
   # Strip regional prefix (e.g., "us." or "eu.") for ARN construction
-  model_arns = [
+  base_model_ids = [
     for model_id in var.allowed_model_ids :
-    "arn:aws:bedrock:${data.aws_region.current.name}::foundation-model/${
-      replace(model_id, "/^(us|eu|apac)\\./", "")
-    }"
+    replace(model_id, "/^(us|eu|apac)\\./", "")
   ]
+
+  # Foundation model ARNs - use wildcard for region to support cross-region inference
+  # Cross-region inference can route to any region (us-east-1, us-east-2, us-west-2, etc.)
+  foundation_model_arns = [
+    for model_id in local.base_model_ids :
+    "arn:aws:bedrock:*::foundation-model/${model_id}"
+  ]
+
+  # Inference profile ARNs (for newer Claude 4.x models with regional prefix)
+  # Use wildcard for region and account to support cross-region inference
+  inference_profile_arns = [
+    for model_id in var.allowed_model_ids :
+    "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/${model_id}"
+  ]
+
+  # Combine both ARN types for IAM policy
+  all_model_arns = concat(local.foundation_model_arns, local.inference_profile_arns)
 
   # Resource name prefix
   name_prefix = "${var.project_name}-bedrock-${var.environment}"
@@ -51,7 +65,7 @@ resource "aws_iam_policy" "bedrock_invoke" {
         Sid      = "BedrockInvokeModel"
         Effect   = "Allow"
         Action   = ["bedrock:InvokeModel"]
-        Resource = local.model_arns
+        Resource = local.all_model_arns
       }
     ]
   })
@@ -84,7 +98,7 @@ resource "aws_iam_policy" "bedrock_invoke_streaming" {
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream"
         ]
-        Resource = local.model_arns
+        Resource = local.all_model_arns
       }
     ]
   })

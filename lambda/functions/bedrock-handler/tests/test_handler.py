@@ -228,7 +228,7 @@ class TestProcessRequest:
             "conversation_id": "conv-123",
             "user_message": "Hello",
             "max_tokens": 512,
-            "temperature": 0.5,
+            "temperature": None,  # Disable to use top_p
             "top_p": 0.8,
         }
 
@@ -243,7 +243,7 @@ class TestProcessRequest:
 
         call_args = mock_client.invoke_model.call_args
         assert call_args.kwargs["max_tokens"] == 512
-        assert call_args.kwargs["temperature"] == 0.5
+        assert call_args.kwargs["temperature"] is None
         assert call_args.kwargs["top_p"] == 0.8
 
     def test_process_request_with_system_prompt_override(

@@ -101,8 +101,8 @@ class BedrockClient:
         messages: list[dict[str, str]],
         system_prompt: str,
         max_tokens: int = 1024,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
+        temperature: float | None = 0.7,
+        top_p: float | None = None,
     ) -> dict[str, Any]:
         """Invoke the Bedrock model with retry logic.
 
@@ -110,8 +110,8 @@ class BedrockClient:
             messages: List of message dicts with 'role' and 'content'.
             system_prompt: System prompt for the model.
             max_tokens: Maximum tokens in response.
-            temperature: Sampling temperature.
-            top_p: Nucleus sampling parameter.
+            temperature: Sampling temperature (0.0-1.0). Cannot be used with top_p.
+            top_p: Nucleus sampling parameter (0.0-1.0). Cannot be used with temperature.
 
         Returns:
             Dict containing response text, token counts, and metadata.
@@ -124,14 +124,19 @@ class BedrockClient:
         start_time = time.time()
 
         # Build the request body for Claude Messages API
-        request_body = {
+        # Note: Claude Haiku 4.5 doesn't allow both temperature and top_p
+        request_body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
             "system": system_prompt,
             "messages": messages,
         }
+
+        # Add sampling parameter (only one allowed for Claude 4.x models)
+        if top_p is not None:
+            request_body["top_p"] = top_p
+        elif temperature is not None:
+            request_body["temperature"] = temperature
 
         try:
             response = self._client.invoke_model(

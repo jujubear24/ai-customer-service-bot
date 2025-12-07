@@ -102,8 +102,15 @@ class BedrockRequest(BaseModel):
 
     # Inference parameters
     max_tokens: int = Field(default=1024, ge=1, le=4096, description="Maximum tokens in response")
-    temperature: float = Field(default=0.7, ge=0.0, le=1.0, description="Sampling temperature")
-    top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Nucleus sampling parameter")
+    temperature: float | None = Field(
+        default=0.7, ge=0.0, le=1.0, description="Sampling temperature (cannot use with top_p)"
+    )
+    top_p: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Nucleus sampling parameter (cannot use with temperature)",
+    )
 
     # Optional overrides
     system_prompt_override: str | None = Field(

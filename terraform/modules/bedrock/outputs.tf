@@ -29,8 +29,8 @@ output "allowed_model_ids" {
 }
 
 output "allowed_model_arns" {
-  description = "List of allowed Bedrock model ARNs"
-  value       = local.model_arns
+  description = "List of allowed Bedrock model ARNs (foundation models and inference profiles)"
+  value       = local.all_model_arns
 }
 
 output "primary_model_id" {

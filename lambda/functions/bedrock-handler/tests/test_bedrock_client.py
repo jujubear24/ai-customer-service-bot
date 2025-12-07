@@ -54,7 +54,6 @@ class TestBedrockClientInvokeModel:
                 system_prompt="You are a helpful assistant.",
                 max_tokens=1024,
                 temperature=0.7,
-                top_p=0.9,
             )
 
         assert result["response_text"] == "Our return policy allows returns within 30 days."
@@ -69,14 +68,14 @@ class TestBedrockClientInvokeModel:
         self,
         mock_boto3_bedrock_client: MagicMock,
     ) -> None:
-        """Test that request body is correctly formatted."""
+        """Test that request body is correctly formatted with top_p."""
         with patch("bedrock_client.boto3.client", return_value=mock_boto3_bedrock_client):
             client = BedrockClient()
             client.invoke_model(
                 messages=[{"role": "user", "content": "Test message"}],
                 system_prompt="System prompt",
                 max_tokens=512,
-                temperature=0.5,
+                temperature=None,  # Disable temperature to use top_p
                 top_p=0.8,
             )
 
@@ -86,8 +85,8 @@ class TestBedrockClientInvokeModel:
 
         assert body["anthropic_version"] == "bedrock-2023-05-31"
         assert body["max_tokens"] == 512
-        assert body["temperature"] == 0.5
         assert body["top_p"] == 0.8
+        assert "temperature" not in body  # Should not be present when top_p is used
         assert body["system"] == "System prompt"
         assert body["messages"] == [{"role": "user", "content": "Test message"}]
 

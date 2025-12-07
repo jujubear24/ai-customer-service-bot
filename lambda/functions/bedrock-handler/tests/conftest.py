@@ -14,6 +14,10 @@ import pytest
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
+# Add shared layer to Python path
+shared_layer_path = Path(__file__).parent.parent.parent.parent / "layers" / "common" / "python"
+sys.path.insert(0, str(shared_layer_path))
+
 # Set environment variables before importing modules
 os.environ["POWERTOOLS_SERVICE_NAME"] = "bedrock-handler"
 os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "AICustomerService"
@@ -35,7 +39,6 @@ def sample_bedrock_request() -> dict[str, Any]:
         "entities": {"topic": "returns"},
         "max_tokens": 1024,
         "temperature": 0.7,
-        "top_p": 0.9,
     }
 
 
@@ -70,7 +73,6 @@ def sample_bedrock_request_with_context() -> dict[str, Any]:
         "intent": "question",
         "max_tokens": 1024,
         "temperature": 0.7,
-        "top_p": 0.9,
     }
 
 
@@ -87,7 +89,6 @@ def sample_bedrock_request_with_rag() -> dict[str, Any]:
         ],
         "max_tokens": 1024,
         "temperature": 0.7,
-        "top_p": 0.9,
     }
 
 
