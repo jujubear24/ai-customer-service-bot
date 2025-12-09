@@ -46,6 +46,17 @@ variable "embedding_model_id" {
   }
 }
 
+variable "embedding_dimensions" {
+  description = "Embedding vector dimensions (only for Titan V2: 256, 512, or 1024)"
+  type        = number
+  default     = 512
+
+  validation {
+    condition     = var.embedding_dimensions == null || contains([256, 512, 1024], var.embedding_dimensions)
+    error_message = "Embedding dimensions must be 256, 512, or 1024 for Titan V2."
+  }
+}
+
 # -----------------------------------------------------------------------------
 # S3 Configuration
 # -----------------------------------------------------------------------------
@@ -58,6 +69,104 @@ variable "s3_version_retention_days" {
   validation {
     condition     = var.s3_version_retention_days >= 1 && var.s3_version_retention_days <= 365
     error_message = "S3 version retention must be between 1 and 365 days."
+  }
+}
+
+variable "s3_inclusion_prefixes" {
+  description = "List of S3 prefixes to include in knowledge base sync"
+  type        = list(string)
+  default     = ["faqs/", "docs/"]
+
+  validation {
+    condition     = length(var.s3_inclusion_prefixes) > 0
+    error_message = "At least one S3 prefix must be specified."
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Vector Store Configuration
+# -----------------------------------------------------------------------------
+
+variable "vector_table_name" {
+  description = "Name of the table in Aurora PostgreSQL for vector storage"
+  type        = string
+  default     = "bedrock_knowledge_base"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9_]{2,62}$", var.vector_table_name))
+    error_message = "Table name must be 3-63 lowercase alphanumeric characters with underscores."
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Chunking Configuration
+# -----------------------------------------------------------------------------
+
+variable "chunking_strategy" {
+  description = "Document chunking strategy (NONE, FIXED_SIZE, SEMANTIC, HIERARCHICAL)"
+  type        = string
+  default     = "SEMANTIC"
+
+  validation {
+    condition     = contains(["NONE", "FIXED_SIZE", "SEMANTIC", "HIERARCHICAL"], var.chunking_strategy)
+    error_message = "Chunking strategy must be one of: NONE, FIXED_SIZE, SEMANTIC, HIERARCHICAL."
+  }
+}
+
+# Semantic chunking variables
+variable "semantic_chunking_max_tokens" {
+  description = "Maximum tokens per chunk for semantic chunking"
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.semantic_chunking_max_tokens >= 50 && var.semantic_chunking_max_tokens <= 1000
+    error_message = "Semantic chunking max tokens must be between 50 and 1000."
+  }
+}
+
+variable "semantic_chunking_buffer_size" {
+  description = "Number of sentences to overlap between chunks"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.semantic_chunking_buffer_size >= 0 && var.semantic_chunking_buffer_size <= 5
+    error_message = "Semantic chunking buffer size must be between 0 and 5."
+  }
+}
+
+variable "semantic_chunking_breakpoint_threshold" {
+  description = "Percentile threshold for semantic breakpoints (higher = fewer breaks)"
+  type        = number
+  default     = 95
+
+  validation {
+    condition     = var.semantic_chunking_breakpoint_threshold >= 50 && var.semantic_chunking_breakpoint_threshold <= 99
+    error_message = "Breakpoint threshold must be between 50 and 99."
+  }
+}
+
+# Fixed size chunking variables
+variable "fixed_chunking_max_tokens" {
+  description = "Maximum tokens per chunk for fixed size chunking"
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.fixed_chunking_max_tokens >= 50 && var.fixed_chunking_max_tokens <= 1000
+    error_message = "Fixed chunking max tokens must be between 50 and 1000."
+  }
+}
+
+variable "fixed_chunking_overlap_percentage" {
+  description = "Percentage of overlap between chunks (0-50)"
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.fixed_chunking_overlap_percentage >= 0 && var.fixed_chunking_overlap_percentage <= 50
+    error_message = "Overlap percentage must be between 0 and 50."
   }
 }
 

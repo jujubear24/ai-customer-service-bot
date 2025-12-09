@@ -1,6 +1,30 @@
 # =============================================================================
-# Knowledge Base Module - Outputs (Step 2 & 3: S3, IAM, Aurora)
+# Knowledge Base Module - Outputs
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Knowledge Base Outputs
+# -----------------------------------------------------------------------------
+
+output "knowledge_base_id" {
+  description = "ID of the Bedrock Knowledge Base"
+  value       = aws_bedrockagent_knowledge_base.main.id
+}
+
+output "knowledge_base_arn" {
+  description = "ARN of the Bedrock Knowledge Base"
+  value       = aws_bedrockagent_knowledge_base.main.arn
+}
+
+output "knowledge_base_name" {
+  description = "Name of the Bedrock Knowledge Base"
+  value       = aws_bedrockagent_knowledge_base.main.name
+}
+
+output "data_source_id" {
+  description = "ID of the S3 data source"
+  value       = aws_bedrockagent_data_source.s3.data_source_id
+}
 
 # -----------------------------------------------------------------------------
 # S3 Bucket Outputs
@@ -115,4 +139,30 @@ output "aurora_credentials_secret_arn" {
 output "aurora_credentials_secret_name" {
   description = "Name of the Secrets Manager secret containing Aurora credentials"
   value       = aws_secretsmanager_secret.aurora_credentials.name
+}
+
+# -----------------------------------------------------------------------------
+# Configuration Outputs (for Lambda environment variables)
+# -----------------------------------------------------------------------------
+
+output "lambda_environment_variables" {
+  description = "Environment variables for RAG Retriever Lambda"
+  value = {
+    KNOWLEDGE_BASE_ID = aws_bedrockagent_knowledge_base.main.id
+    AWS_REGION        = local.region
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Embedding Configuration Outputs
+# -----------------------------------------------------------------------------
+
+output "embedding_model_id" {
+  description = "ID of the embedding model used"
+  value       = var.embedding_model_id
+}
+
+output "embedding_dimensions" {
+  description = "Vector dimensions used for embeddings"
+  value       = var.embedding_dimensions
 }

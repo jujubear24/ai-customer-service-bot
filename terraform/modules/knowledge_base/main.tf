@@ -438,3 +438,127 @@ resource "aws_iam_role_policy" "bedrock_kb_secrets" {
     ]
   })
 }
+
+# =============================================================================
+# Amazon Bedrock Knowledge Base
+# =============================================================================
+
+resource "aws_bedrockagent_knowledge_base" "main" {
+  name        = "${local.name_prefix}-knowledge-base"
+  description = "Knowledge base for ${var.project_name} customer service"
+  role_arn    = aws_iam_role.bedrock_kb.arn
+
+  knowledge_base_configuration {
+    type = "VECTOR"
+
+    vector_knowledge_base_configuration {
+      embedding_model_arn = "arn:aws:bedrock:${local.region}::foundation-model/${var.embedding_model_id}"
+
+      # Embedding model configuration for Titan V2
+      dynamic "embedding_model_configuration" {
+        for_each = var.embedding_dimensions != null ? [1] : []
+        content {
+          bedrock_embedding_model_configuration {
+            dimensions = var.embedding_dimensions
+          }
+        }
+      }
+    }
+  }
+
+  storage_configuration {
+    type = "RDS"
+
+    rds_configuration {
+      credentials_secret_arn = aws_secretsmanager_secret.aurora_credentials.arn
+      database_name          = aws_rds_cluster.knowledge_base.database_name
+      resource_arn           = aws_rds_cluster.knowledge_base.arn
+      table_name             = var.vector_table_name
+
+      field_mapping {
+        primary_key_field = "id"
+        vector_field      = "embedding"
+        text_field        = "content"
+        metadata_field    = "metadata"
+      }
+    }
+  }
+
+  tags = local.common_tags
+
+  depends_on = [
+    aws_rds_cluster_instance.knowledge_base,
+    aws_iam_role_policy.bedrock_kb_s3,
+    aws_iam_role_policy.bedrock_kb_model,
+    aws_iam_role_policy.bedrock_kb_rds,
+    aws_iam_role_policy.bedrock_kb_secrets
+  ]
+}
+
+# =============================================================================
+# S3 Data Source for Knowledge Base
+# =============================================================================
+
+resource "aws_bedrockagent_data_source" "s3" {
+  name                 = "${local.name_prefix}-s3-source"
+  knowledge_base_id    = aws_bedrockagent_knowledge_base.main.id
+  data_deletion_policy = "RETAIN" # Keep data in vector store if source deleted
+
+  data_source_configuration {
+    type = "S3"
+
+    s3_configuration {
+      bucket_arn              = aws_s3_bucket.knowledge_base.arn
+      inclusion_prefixes      = var.s3_inclusion_prefixes
+      bucket_owner_account_id = local.account_id
+    }
+  }
+
+  vector_ingestion_configuration {
+    chunking_configuration {
+      chunking_strategy = var.chunking_strategy
+
+      dynamic "semantic_chunking_configuration" {
+        for_each = var.chunking_strategy == "SEMANTIC" ? [1] : []
+        content {
+          max_token                       = var.semantic_chunking_max_tokens
+          buffer_size                     = var.semantic_chunking_buffer_size
+          breakpoint_percentile_threshold = var.semantic_chunking_breakpoint_threshold
+        }
+      }
+
+      dynamic "fixed_size_chunking_configuration" {
+        for_each = var.chunking_strategy == "FIXED_SIZE" ? [1] : []
+        content {
+          max_tokens         = var.fixed_chunking_max_tokens
+          overlap_percentage = var.fixed_chunking_overlap_percentage
+        }
+      }
+    }
+  }
+}
+
+# =============================================================================
+# IAM Policy for RAG Retriever Lambda to Query Knowledge Base
+# =============================================================================
+
+resource "aws_iam_role_policy" "rag_retriever_bedrock" {
+  name = "${local.name_prefix}-rag-retriever-bedrock"
+  role = aws_iam_role.rag_retriever.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:Retrieve",
+          "bedrock:RetrieveAndGenerate"
+        ]
+        Resource = [
+          aws_bedrockagent_knowledge_base.main.arn
+        ]
+      }
+    ]
+  })
+}
