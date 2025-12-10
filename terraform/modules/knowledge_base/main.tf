@@ -89,6 +89,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "knowledge_base" {
     id     = "cleanup-old-versions"
     status = "Enabled"
 
+    filter {} # Apply to all objects
+
     noncurrent_version_expiration {
       noncurrent_days = var.s3_version_retention_days
     }
@@ -542,9 +544,10 @@ resource "aws_bedrockagent_data_source" "s3" {
 # IAM Policy for RAG Retriever Lambda to Query Knowledge Base
 # =============================================================================
 
-resource "aws_iam_role_policy" "rag_retriever_bedrock" {
-  name = "${local.name_prefix}-rag-retriever-bedrock"
-  role = aws_iam_role.rag_retriever.id
+# Standalone policy that can be attached to any Lambda role
+resource "aws_iam_policy" "rag_retriever_bedrock" {
+  name        = "${local.name_prefix}-rag-retriever-bedrock"
+  description = "Allows Lambda to retrieve from Bedrock Knowledge Base"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -561,4 +564,12 @@ resource "aws_iam_role_policy" "rag_retriever_bedrock" {
       }
     ]
   })
+
+  tags = local.common_tags
+}
+
+# Attach to the module-created role (for standalone use)
+resource "aws_iam_role_policy_attachment" "rag_retriever_bedrock" {
+  role       = aws_iam_role.rag_retriever.name
+  policy_arn = aws_iam_policy.rag_retriever_bedrock.arn
 }

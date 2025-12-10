@@ -58,3 +58,32 @@ output "cloudwatch_dashboard_name" {
   description = "Name of the main CloudWatch dashboard"
   value       = module.observability.dashboard_name
 }
+
+# =============================================================================
+# Knowledge Base and Rag Handler Outputs
+# =============================================================================
+
+output "knowledge_base_id" {
+  description = "ID of the Bedrock Knowledge Base"
+  value       = module.knowledge_base.knowledge_base_id
+}
+
+output "knowledge_base_arn" {
+  description = "ARN of the Bedrock Knowledge Base"
+  value       = module.knowledge_base.knowledge_base_arn
+}
+
+output "s3_bucket_name" {
+  description = "S3 bucket for knowledge base documents"
+  value       = module.knowledge_base.s3_bucket_name
+}
+
+output "data_source_id" {
+  description = "ID of the S3 data source"
+  value       = module.knowledge_base.data_source_id
+}
+
+output "aurora_cluster_endpoint" {
+  description = "Aurora PostgreSQL cluster endpoint"
+  value       = module.knowledge_base.aurora_cluster_endpoint
+}

@@ -57,3 +57,13 @@ variable "metrics_namespace" {
   type        = string
   default     = "CustomerServiceBot"
 }
+
+# =============================================================================
+# Knowledge Base Variables
+# =============================================================================
+
+variable "aurora_master_password" {
+  description = "Master password for Aurora PostgreSQL cluster"
+  type        = string
+  sensitive   = true
+}

@@ -109,6 +109,21 @@ module "lambda" {
       additional_policy_statements = []
     }
 
+    rag-retriever = {
+      handler     = "src.handler.handler"
+      runtime     = "python3.12"
+      timeout     = 30
+      memory_size = 256
+      environment_variables = {
+        KNOWLEDGE_BASE_ID = module.knowledge_base.knowledge_base_id
+      }
+      enable_xray                  = true
+      additional_layers            = []
+      additional_policy_arns       = [module.knowledge_base.rag_retriever_policy_arn]
+      additional_policy_statements = []
+    }
+
+
 
   }
 }
@@ -157,6 +172,7 @@ module "observability" {
     module.lambda.intent_classifier_function_name,
     module.lambda.context_builder_function_name,
     module.lambda.bedrock_handler_function_name,
+    module.lambda.rag_retriever_function_name,
   ]
 
   log_retention_days = 7
@@ -165,4 +181,36 @@ module "observability" {
 
   common_tags = local.common_tags
   api_url     = module.api_gateway.api_endpoint
+}
+
+# =============================================================================
+# Knowledge Base Configuration - Dev Environment
+# =============================================================================
+
+module "knowledge_base" {
+  source = "../../modules/knowledge_base"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  # Aurora PostgreSQL configuration
+  aurora_master_password = var.aurora_master_password
+  aurora_min_capacity    = 0.5 # Minimum ACUs for cost savings
+  aurora_max_capacity    = 4   # Max ACUs for dev
+
+  # Embedding configuration
+  embedding_model_id   = "amazon.titan-embed-text-v2:0"
+  embedding_dimensions = 512
+
+  # S3 data source configuration
+  s3_inclusion_prefixes     = ["faqs/", "docs/"]
+  s3_version_retention_days = 30
+
+  # Chunking configuration (semantic for customer service content)
+  chunking_strategy                      = "SEMANTIC"
+  semantic_chunking_max_tokens           = 300
+  semantic_chunking_buffer_size          = 1
+  semantic_chunking_breakpoint_threshold = 95
+
+  tags = local.common_tags
 }

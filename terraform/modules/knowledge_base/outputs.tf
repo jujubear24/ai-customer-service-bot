@@ -69,6 +69,11 @@ output "rag_retriever_role_name" {
   value       = aws_iam_role.rag_retriever.name
 }
 
+output "rag_retriever_policy_arn" {
+  description = "ARN of the IAM policy for RAG Retriever Lambda (attach to your Lambda role)"
+  value       = aws_iam_policy.rag_retriever_bedrock.arn
+}
+
 # -----------------------------------------------------------------------------
 # VPC Outputs
 # -----------------------------------------------------------------------------

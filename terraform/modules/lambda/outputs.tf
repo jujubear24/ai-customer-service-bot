@@ -68,3 +68,18 @@ output "bedrock_handler_invoke_arn" {
   description = "Invoke ARN of the Bedrock Handler Lambda function"
   value       = try(aws_lambda_function.this["bedrock-handler"].invoke_arn, null)
 }
+
+output "rag_retriever_function_name" {
+  description = "RAG Retriever function name"
+  value       = try(aws_lambda_function.this["rag-retriever"].function_name, null)
+}
+
+output "rag_retriever_function_arn" {
+  description = "RAG Retriever function ARN"
+  value       = try(aws_lambda_function.this["rag-retriever"].arn, null)
+}
+
+output "rag_retriever_invoke_arn" {
+  description = "RAG Retriever function invoke ARN"
+  value       = try(aws_lambda_function.this["rag-retriever"].invoke_arn, null)
+}
