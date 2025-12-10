@@ -1,8 +1,9 @@
 # ADR-010: Knowledge Base for Amazon Bedrock (RAG)
 
-**Status**: Accepted
-**Date**: 2025-12-07
-**Deciders:** Senior Cloud Architect, Development Team
+**Date:** 2025-12-10
+**Status:** Implemented (Phase 2.2 Complete)
+
+---
 
 ## Context
 
@@ -64,7 +65,7 @@ The Bedrock Handler Lambda (Phase 2.1) already supports RAG context injection vi
 
 **Configuration**:
 
-```bash
+```hcl
 min_capacity = 0.5  # Minimum ACUs (cost savings)
 max_capacity = 4    # Maximum ACUs for dev (scale up for prod)
 auto_pause   = true # Pause after 5 min inactivity (dev only)
@@ -95,7 +96,7 @@ auto_pause   = true # Pause after 5 min inactivity (dev only)
 
 **Configuration**:
 
-```toml
+```hcl
 chunking_configuration {
   chunking_strategy = "SEMANTIC"
   semantic_chunking_configuration {
@@ -221,4 +222,76 @@ s3://ai-customer-service-kb-{env}/
 - [Amazon Bedrock Knowledge Bases Documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base.html)
 - [Aurora PostgreSQL pgvector Integration](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.VectorDB.html)
 - [Titan Embeddings V2 Model Card](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html)
-- [ADR-009: Bedrock Integration (Phase 2.1)](./009-bedrock-integration.md)
+- ADR-009: Bedrock Integration (Phase 2.1)
+
+---
+
+## Implementation Notes
+
+   Added after implementation (Phase 2.2)
+
+---
+
+### Components Implemented
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| Terraform Module | `terraform/modules/knowledge_base/` | S3, Aurora, Bedrock KB, IAM |
+| RAG Retriever Lambda | `lambda/functions/rag-retriever/` | Retrieval service + handler |
+| Sample Documents | `knowledge-base-docs/` | FAQs and policies |
+| Sync Script | `scripts/sync-knowledge-base.sh` | S3 upload + ingestion trigger |
+
+### Key Implementation Decisions
+
+1. **Lambda Module Integration**: Instead of a separate Lambda module, the RAG Retriever was added to the existing `module "lambda"` functions map for consistency.
+
+2. **Standalone IAM Policy**: The `rag_retriever_policy_arn` output allows the policy to be attached to any Lambda role, supporting the reusable Lambda module pattern.
+
+3. **VPC Creation**: The module creates its own VPC/subnets for Aurora if not provided, simplifying dev deployment.
+
+4. **Secrets Manager**: Aurora credentials stored in Secrets Manager for Bedrock KB authentication.
+
+### Files Created
+
+```bash
+terraform/modules/knowledge_base/
+├── main.tf              # S3, VPC, Aurora, Bedrock KB, IAM
+├── variables.tf         # All configuration variables
+├── outputs.tf           # Module outputs including policy ARN
+└── README.md            # Usage documentation
+
+lambda/functions/rag-retriever/
+├── src/
+│   ├── models.py        # Pydantic request/response models
+│   ├── service.py       # RetrievalService (Bedrock KB API)
+│   └── handler.py       # Lambda entry point
+├── tests/
+│   ├── test_models.py   # Model unit tests
+│   ├── test_service.py  # Service unit tests
+│   └── test_handler.py  # Handler unit tests
+└── pyproject.toml       # Dependencies and tooling
+
+knowledge-base-docs/
+├── faqs/
+│   ├── general-faqs.md
+│   ├── billing-faqs.md
+│   └── technical-faqs.md
+└── docs/policies/
+    └── refund-policy.md
+
+scripts/
+└── sync-knowledge-base.sh
+
+docs/guides/
+└── phase-2.2-rag-integration.md
+```
+
+### Integration Point
+
+The RAG Retriever returns `rag_context: list[str]` which maps directly to `BedrockRequest.rag_context` in the shared layer types. No changes to the Bedrock Handler were required.
+
+### Deployment Prerequisites
+
+1. Set `aurora_master_password` in `terraform.tfvars` (sensitive, not committed)
+2. Enable Bedrock model access for Titan Embeddings V2
+3. Run `terraform init` to download module dependencies
