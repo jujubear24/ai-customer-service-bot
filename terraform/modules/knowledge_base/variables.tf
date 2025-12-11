@@ -11,8 +11,8 @@ variable "project_name" {
   type        = string
 
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{2,20}$", var.project_name))
-    error_message = "Project name must be 3-21 lowercase alphanumeric characters, starting with a letter."
+    condition     = can(regex("^[a-z][a-z0-9-]{2,40}$", var.project_name))
+    error_message = "Project name must be 3-41 lowercase alphanumeric characters with hyphens, starting with a letter."
   }
 }
 
@@ -69,17 +69,6 @@ variable "s3_version_retention_days" {
   validation {
     condition     = var.s3_version_retention_days >= 1 && var.s3_version_retention_days <= 365
     error_message = "S3 version retention must be between 1 and 365 days."
-  }
-}
-
-variable "s3_inclusion_prefixes" {
-  description = "List of S3 prefixes to include in knowledge base sync"
-  type        = list(string)
-  default     = ["faqs/", "docs/"]
-
-  validation {
-    condition     = length(var.s3_inclusion_prefixes) > 0
-    error_message = "At least one S3 prefix must be specified."
   }
 }
 
@@ -208,7 +197,7 @@ variable "subnet_ids" {
 variable "aurora_engine_version" {
   description = "Aurora PostgreSQL engine version (must support pgvector: 15.4+)"
   type        = string
-  default     = "15.4"
+  default     = "15.6"
 
   validation {
     condition     = can(regex("^1[5-9]\\.", var.aurora_engine_version))

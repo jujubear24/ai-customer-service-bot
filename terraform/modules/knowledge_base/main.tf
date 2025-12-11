@@ -307,7 +307,8 @@ resource "aws_db_subnet_group" "aurora" {
 }
 
 resource "aws_rds_cluster" "knowledge_base" {
-  cluster_identifier = "${local.name_prefix}-kb-cluster"
+  cluster_identifier   = "${local.name_prefix}-kb-cluster"
+  enable_http_endpoint = true
 
   engine         = "aurora-postgresql"
   engine_mode    = "provisioned"
@@ -390,6 +391,16 @@ resource "aws_iam_role_policy" "bedrock_kb_rds" {
         ]
         Resource = [
           "arn:aws:rds-db:${local.region}:${local.account_id}:dbuser:${aws_rds_cluster.knowledge_base.cluster_resource_id}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-data:ExecuteStatement",
+          "rds-data:BatchExecuteStatement"
+        ]
+        Resource = [
+          aws_rds_cluster.knowledge_base.arn
         ]
       }
     ]
@@ -511,8 +522,8 @@ resource "aws_bedrockagent_data_source" "s3" {
 
     s3_configuration {
       bucket_arn              = aws_s3_bucket.knowledge_base.arn
-      inclusion_prefixes      = var.s3_inclusion_prefixes
       bucket_owner_account_id = local.account_id
+      # Note: inclusion_prefixes limited to 1 item, so we sync entire bucket
     }
   }
 

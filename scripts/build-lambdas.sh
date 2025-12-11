@@ -84,9 +84,8 @@ if [ "$BUILD_FUNCTIONS" = true ]; then
         "intent-classifier"
         "context-builder"
         "bedrock-handler"
+        "rag-retriever"
         # Add more functions here as you build them:
-        # "context-builder"
-        # "response-validator"
     )
 
     for FUNCTION in "${LAMBDA_FUNCTIONS[@]}"; do
@@ -199,6 +198,6 @@ echo ""
 ls -lh "$BUILD_OUTPUT"/*.zip 2>/dev/null | awk '{print "  " $9 " (" $5 ")"}'
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "  1. Run tests: cd lambda/functions/intent-classifier && uv run pytest"
+echo "  1. Run tests: cd lambda/functions/function-to-test && uv run pytest"
 echo "  2. Deploy: cd terraform/environments/dev && terraform apply"
 echo ""

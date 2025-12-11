@@ -110,7 +110,7 @@ module "lambda" {
     }
 
     rag-retriever = {
-      handler     = "src.handler.handler"
+      handler     = "handler.handler"
       runtime     = "python3.12"
       timeout     = 30
       memory_size = 256
@@ -203,7 +203,6 @@ module "knowledge_base" {
   embedding_dimensions = 512
 
   # S3 data source configuration
-  s3_inclusion_prefixes     = ["faqs/", "docs/"]
   s3_version_retention_days = 30
 
   # Chunking configuration (semantic for customer service content)
