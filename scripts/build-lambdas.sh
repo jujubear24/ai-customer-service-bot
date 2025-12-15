@@ -85,6 +85,7 @@ if [ "$BUILD_FUNCTIONS" = true ]; then
         "context-builder"
         "bedrock-handler"
         "rag-retriever"
+        "chat-orchestrator"
         # Add more functions here as you build them:
     )
 

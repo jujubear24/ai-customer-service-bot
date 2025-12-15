@@ -1,11 +1,16 @@
 output "layer_arn" {
-  description = "ARN of the shared Lambda layer"
-  value       = aws_lambda_layer_version.shared.arn
+  description = "ARN of the Lambda layer (if created)"
+  value       = var.create_layer ? aws_lambda_layer_version.this[0].arn : null
 }
 
 output "layer_version" {
-  description = "Version of the shared Lambda layer"
-  value       = aws_lambda_layer_version.shared.version
+  description = "Version of the Lambda layer (if created)"
+  value       = var.create_layer ? aws_lambda_layer_version.this[0].version : null
+}
+
+output "layer_name" {
+  description = "Name of the Lambda layer (if created)"
+  value       = var.create_layer ? aws_lambda_layer_version.this[0].layer_name : null
 }
 
 output "function_names" {
@@ -33,7 +38,10 @@ output "role_names" {
   value       = { for k, v in aws_iam_role.lambda : k => v.name }
 }
 
+# =============================================================================
 # Convenience outputs for specific functions
+# =============================================================================
+
 output "intent_classifier_function_name" {
   description = "Intent Classifier function name"
   value       = try(aws_lambda_function.this["intent-classifier"].function_name, null)
@@ -82,4 +90,19 @@ output "rag_retriever_function_arn" {
 output "rag_retriever_invoke_arn" {
   description = "RAG Retriever function invoke ARN"
   value       = try(aws_lambda_function.this["rag-retriever"].invoke_arn, null)
+}
+
+output "chat_orchestrator_function_name" {
+  description = "Chat Orchestrator function name"
+  value       = try(aws_lambda_function.this["chat-orchestrator"].function_name, null)
+}
+
+output "chat_orchestrator_function_arn" {
+  description = "Chat Orchestrator function ARN"
+  value       = try(aws_lambda_function.this["chat-orchestrator"].arn, null)
+}
+
+output "chat_orchestrator_invoke_arn" {
+  description = "Chat Orchestrator function invoke ARN"
+  value       = try(aws_lambda_function.this["chat-orchestrator"].invoke_arn, null)
 }

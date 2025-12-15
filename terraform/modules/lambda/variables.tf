@@ -26,6 +26,44 @@ variable "common_tags" {
   default     = {}
 }
 
+# =============================================================================
+# Layer Configuration
+# =============================================================================
+
+variable "create_layer" {
+  description = "Whether to create a Lambda layer in this module instance"
+  type        = bool
+  default     = false
+}
+
+variable "layer_name" {
+  description = "Name suffix for the Lambda layer (full name: {project}-{env}-{layer_name})"
+  type        = string
+  default     = null
+}
+
+variable "layer_zip_path" {
+  description = "Path to the pre-built layer zip file (defaults to builds/{layer_name}.zip)"
+  type        = string
+  default     = null
+}
+
+variable "layer_compatible_runtimes" {
+  description = "List of compatible runtimes for the layer"
+  type        = list(string)
+  default     = ["python3.12"]
+}
+
+variable "layer_description" {
+  description = "Description for the Lambda layer"
+  type        = string
+  default     = "Shared dependencies layer"
+}
+
+# =============================================================================
+# Function Configuration
+# =============================================================================
+
 variable "functions" {
   description = "Map of Lambda functions to deploy"
   type = map(object({

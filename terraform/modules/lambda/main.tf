@@ -23,17 +23,30 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 # ==============================================================================
-# Shared Lambda Layer
+# Local Variables
 # ==============================================================================
 
-# Deploy the shared layer (built by scripts/build-lambda-layer.sh)
-resource "aws_lambda_layer_version" "shared" {
-  filename            = "${path.module}/builds/shared-layer.zip"
-  layer_name          = "${var.project_name}-shared-layer-${var.environment}"
-  source_code_hash    = filebase64sha256("${path.module}/builds/shared-layer.zip")
-  compatible_runtimes = ["python3.12"]
+locals {
+  # Determine layer zip path
+  layer_zip_path = var.create_layer ? coalesce(
+    var.layer_zip_path,
+    "${path.module}/builds/${var.layer_name}.zip"
+  ) : null
+}
 
-  description = "Shared utilities for Lambda functions (Powertools, Pydantic models, config)"
+# ==============================================================================
+# Shared Lambda Layer (Conditional)
+# ==============================================================================
+
+resource "aws_lambda_layer_version" "this" {
+  count = var.create_layer ? 1 : 0
+
+  filename            = local.layer_zip_path
+  layer_name          = "${var.project_name}-${var.layer_name}-${var.environment}"
+  source_code_hash    = filebase64sha256(local.layer_zip_path)
+  compatible_runtimes = var.layer_compatible_runtimes
+
+  description = var.layer_description
 
   lifecycle {
     create_before_destroy = true
@@ -44,7 +57,6 @@ resource "aws_lambda_layer_version" "shared" {
 # Lambda Functions (Dynamic)
 # ==============================================================================
 
-# Lambda function resource
 resource "aws_lambda_function" "this" {
   for_each = var.functions
 
@@ -58,7 +70,8 @@ resource "aws_lambda_function" "this" {
   timeout     = each.value.timeout
   memory_size = each.value.memory_size
 
-  layers = concat([aws_lambda_layer_version.shared.arn], each.value.additional_layers)
+  # Use additional_layers directly - layer ARN should be passed in from the layer module
+  layers = each.value.additional_layers
 
   environment {
     variables = merge(

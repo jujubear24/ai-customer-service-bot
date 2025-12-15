@@ -6,6 +6,11 @@
 
 locals {
   common_tags = var.common_tags
+
+  # Predict function names to avoid circular dependencies in module.lambda
+  # Pattern: {project}-{function}-{environment} (matches existing deployed resources)
+  rag_function_name     = "${var.project_name}-rag-retriever-${var.environment}"
+  bedrock_function_name = "${var.project_name}-bedrock-handler-${var.environment}"
 }
 
 # ==============================================================================
@@ -36,7 +41,7 @@ module "bedrock" {
   project_name = var.project_name
   environment  = var.environment
 
-  # Default model: Claude 3.5 Sonnet v2
+  # Claude Haiku 4.5 for optimal price-performance
   allowed_model_ids = ["us.anthropic.claude-haiku-4-5-20251001-v1:0"]
 
   # Streaming disabled for now (can enable for Phase 6 frontend)
@@ -52,7 +57,30 @@ module "bedrock" {
 }
 
 # ==============================================================================
-# Lambda Module
+# Lambda Layer Module (Shared Dependencies)
+# ==============================================================================
+
+module "lambda_layer" {
+  source = "../../modules/lambda"
+
+  project_name      = var.project_name
+  environment       = var.environment
+  log_level         = var.log_level
+  metrics_namespace = var.metrics_namespace
+  common_tags       = local.common_tags
+
+  # Layer configuration
+  create_layer      = true
+  layer_name        = "shared-layer"
+  layer_zip_path    = "${path.module}/../../modules/lambda/builds/shared-layer.zip"
+  layer_description = "Shared dependencies: Powertools, Pydantic, common utilities"
+
+  # No functions in this module instance
+  functions = {}
+}
+
+# ==============================================================================
+# Lambda Functions Module
 # ==============================================================================
 
 module "lambda" {
@@ -64,16 +92,18 @@ module "lambda" {
   metrics_namespace = var.metrics_namespace
   common_tags       = local.common_tags
 
+  # No layer creation in this instance
+  create_layer = false
+
   functions = {
     intent-classifier = {
-      handler               = "handler.lambda_handler"
-      runtime               = "python3.12"
-      timeout               = 30
-      memory_size           = 256
-      environment_variables = {}
-      enable_xray           = true
-      # Explicitly empty lists are fine
-      additional_layers            = []
+      handler                      = "handler.lambda_handler"
+      runtime                      = "python3.12"
+      timeout                      = 30
+      memory_size                  = 256
+      environment_variables        = {}
+      enable_xray                  = true
+      additional_layers            = [module.lambda_layer.layer_arn]
       additional_policy_arns       = []
       additional_policy_statements = []
     }
@@ -89,22 +119,23 @@ module "lambda" {
         MAX_TOKENS   = "8000"
       }
       enable_xray                  = true
-      additional_layers            = []
+      additional_layers            = [module.lambda_layer.layer_arn]
       additional_policy_arns       = [module.dynamodb.iam_policy_arn]
       additional_policy_statements = []
     }
+
     bedrock-handler = {
       handler     = "handler.handler"
       runtime     = "python3.12"
       timeout     = 60 # Higher timeout for Bedrock calls
       memory_size = 512
       environment_variables = {
-        BEDROCK_MODEL_ID = module.bedrock.primary_model_id # us.anthropic.claude-haiku-4-5-20251001-v1:0
+        BEDROCK_MODEL_ID = module.bedrock.primary_model_id
         MAX_TOKENS       = "1024"
         TEMPERATURE      = "0.7"
       }
       enable_xray                  = true
-      additional_layers            = []
+      additional_layers            = [module.lambda_layer.layer_arn]
       additional_policy_arns       = [module.bedrock.invoke_policy_arn]
       additional_policy_statements = []
     }
@@ -118,14 +149,56 @@ module "lambda" {
         KNOWLEDGE_BASE_ID = module.knowledge_base.knowledge_base_id
       }
       enable_xray                  = true
-      additional_layers            = []
+      additional_layers            = [module.lambda_layer.layer_arn]
       additional_policy_arns       = [module.knowledge_base.rag_retriever_policy_arn]
       additional_policy_statements = []
     }
 
-
-
+    chat-orchestrator = {
+      handler     = "handler.lambda_handler"
+      runtime     = "python3.12"
+      timeout     = 29
+      memory_size = 512
+      environment_variables = {
+        POWERTOOLS_SERVICE_NAME      = "chat-orchestrator"
+        POWERTOOLS_METRICS_NAMESPACE = "ChatBot"
+        RAG_FUNCTION_NAME            = local.rag_function_name
+        BEDROCK_FUNCTION_NAME        = local.bedrock_function_name
+      }
+      enable_xray                  = true
+      additional_layers            = [module.lambda_layer.layer_arn]
+      additional_policy_arns       = []
+      additional_policy_statements = []
+    }
   }
+}
+
+# ==============================================================================
+# Orchestrator Permissions (Avoid Circular Dependencies)
+# ==============================================================================
+
+resource "aws_iam_policy" "orchestrator_invoke_policy" {
+  name        = "${var.project_name}-${var.environment}-orchestrator-invoke-policy"
+  description = "Allow Chat Orchestrator to invoke RAG and Bedrock Lambdas"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunction"
+        Resource = [
+          module.lambda.function_arns["rag-retriever"],
+          module.lambda.function_arns["bedrock-handler"]
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "orchestrator_invoke_attachment" {
+  role       = module.lambda.role_names["chat-orchestrator"]
+  policy_arn = aws_iam_policy.orchestrator_invoke_policy.arn
 }
 
 # ==============================================================================
@@ -138,10 +211,8 @@ module "api_gateway" {
   project_name = var.project_name
   environment  = var.environment
 
-
-  intent_classifier_invoke_arn    = module.lambda.intent_classifier_invoke_arn
-  intent_classifier_function_name = module.lambda.intent_classifier_function_name
-
+  intent_classifier_invoke_arn    = module.lambda.function_invoke_arns["intent-classifier"]
+  intent_classifier_function_name = module.lambda.function_names["intent-classifier"]
 
   log_retention_days     = 7
   api_logging_level      = "INFO"
@@ -149,11 +220,6 @@ module "api_gateway" {
 
   throttle_burst_limit = 100
   throttle_rate_limit  = 50
-
-
-
-
-
 
   common_tags = local.common_tags
 }
@@ -173,6 +239,7 @@ module "observability" {
     module.lambda.context_builder_function_name,
     module.lambda.bedrock_handler_function_name,
     module.lambda.rag_retriever_function_name,
+    module.lambda.chat_orchestrator_function_name,
   ]
 
   log_retention_days = 7
@@ -183,9 +250,9 @@ module "observability" {
   api_url     = module.api_gateway.api_endpoint
 }
 
-# =============================================================================
-# Knowledge Base Configuration - Dev Environment
-# =============================================================================
+# ==============================================================================
+# Knowledge Base Module
+# ==============================================================================
 
 module "knowledge_base" {
   source = "../../modules/knowledge_base"
