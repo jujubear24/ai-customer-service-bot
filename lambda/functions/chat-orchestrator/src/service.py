@@ -16,7 +16,7 @@ tracer = Tracer()
 class RAGRetrieverClient:
     """Client for invoking the RAG Retriever Lambda function."""
 
-    def __init__(self, function_name: str, lambda_client: Any = None):
+    def __init__(self, function_name: str, lambda_client: Any = None) -> None:
         self.function_name = function_name
         self.client = lambda_client or boto3.client("lambda")
 
@@ -44,7 +44,7 @@ class RAGRetrieverClient:
             response_payload = json.loads(response["Payload"].read())
 
             # Check for function error
-            if "functionError" in response or "errorMessage" in response_payload:
+            if "FunctionError" in response or "errorMessage" in response_payload:
                 logger.error(f"RAG Retriever error: {response_payload}")
                 return []
 
@@ -67,7 +67,7 @@ class RAGRetrieverClient:
 class BedrockHandlerClient:
     """Client for invoking the Bedrock Handler Lambda function."""
 
-    def __init__(self, function_name: str, lambda_client: Any = None):
+    def __init__(self, function_name: str, lambda_client: Any = None) -> None:
         self.function_name = function_name
         self.client = lambda_client or boto3.client("lambda")
 
@@ -79,14 +79,18 @@ class BedrockHandlerClient:
         reraise=True,
     )
     def generate_response(
-        self, message: str, context: list[str], conversation_id: str | None, tenant_id: str
+        self,
+        message: str,
+        context: list[str],
+        conversation_id: str | None,
+        tenant_id: str,
     ) -> dict[str, Any]:
         """
         Generate a response using the Bedrock Handler.
         Retries on ClientErrors (throttling, timeouts).
         """
         payload = {
-            "message": message,
+            "user_message": message,
             "rag_context": context,
             "conversation_id": conversation_id,
             "tenant_id": tenant_id,
@@ -101,20 +105,34 @@ class BedrockHandlerClient:
 
         response_payload = json.loads(response["Payload"].read())
 
-        # Handle Lambda function errors (4xx/5xx from the handler)
-        if "functionError" in response or "errorMessage" in response_payload:
+        # Handle Lambda function errors
+        if "FunctionError" in response or "errorMessage" in response_payload:
             error_msg = response_payload.get("errorMessage", "Unknown Bedrock error")
             logger.error(f"Bedrock Handler failed: {error_msg}")
             raise RuntimeError(f"Bedrock generation failed: {error_msg}")
 
-        # Cast to dict[str, Any] to satisfy Mypy
+        # Parse API Gateway-style response if present
+        if "statusCode" in response_payload:
+            if response_payload["statusCode"] != 200:
+                raise RuntimeError(
+                    f"Bedrock Handler returned status {response_payload['statusCode']}"
+                )
+            # Parse the stringified body
+            body = response_payload.get("body", "{}")
+            if isinstance(body, str):
+                response_payload = json.loads(body)
+            else:
+                response_payload = body
+
         return cast(dict[str, Any], response_payload)
 
 
 class ChatOrchestrator:
     """Coordinator for the chat flow."""
 
-    def __init__(self, rag_client: RAGRetrieverClient, bedrock_client: BedrockHandlerClient):
+    def __init__(
+        self, rag_client: RAGRetrieverClient, bedrock_client: BedrockHandlerClient
+    ) -> None:
         self.rag_client = rag_client
         self.bedrock_client = bedrock_client
 
@@ -132,7 +150,9 @@ class ChatOrchestrator:
 
         if request.use_rag:
             sources = self.rag_client.retrieve(
-                query=request.message, tenant_id=request.tenant_id, options=request.rag_options
+                query=request.message,
+                tenant_id=request.tenant_id,
+                options=request.rag_options,
             )
 
         rag_duration_ms = (time.perf_counter() - rag_start) * 1000
@@ -158,8 +178,8 @@ class ChatOrchestrator:
         total_duration_ms = (time.perf_counter() - start_time) * 1000
 
         # 4. Response Assembly
-        response_text = bedrock_result.get("response", "")
-        model_used = bedrock_result.get("model", "unknown")
+        response_text = bedrock_result.get("response_text", "")
+        model_used = bedrock_result.get("model_id", "unknown")
         conversation_id = bedrock_result.get("conversation_id", request.conversation_id)
 
         return ChatResponse.create(

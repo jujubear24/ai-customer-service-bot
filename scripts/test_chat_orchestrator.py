@@ -21,11 +21,15 @@ def test_chat_orchestrator(
     print(f"💬 Message: '{message}' (RAG: {use_rag})")
 
     payload = {
-        "message": message,
-        "tenant_id": "e2e-test-tenant",
-        "conversation_id": "e2e-test-conv-001",
-        "use_rag": use_rag,
-        "rag_options": {"top_k": 2, "min_score": 0.5},
+        "body": json.dumps(
+            {
+                "message": message,
+                "tenant_id": "e2e-test-tenant",
+                "conversation_id": "e2e-test-conv-001",
+                "use_rag": use_rag,
+                "rag_options": {"top_k": 2, "min_score": 0.5},
+            }
+        )
     }
 
     try:
