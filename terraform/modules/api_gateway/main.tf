@@ -18,7 +18,7 @@ terraform {
 # REST API Gateway
 # ==============================================================================
 
-# Creates to-level API, which is the container for all routes.
+# Creates top-level API, which is the container for all routes.
 resource "aws_api_gateway_rest_api" "main" {
   name        = "${var.project_name}-api-${var.environment}"
   description = "AI Customer Service Bot API - ${var.environment}"
@@ -90,6 +90,17 @@ resource "aws_iam_role_policy_attachment" "api_gateway_cloudwatch" {
 }
 
 # ==============================================================================
+# Request Validator (Shared)
+# ==============================================================================
+
+resource "aws_api_gateway_request_validator" "body" {
+  name                        = "${var.project_name}-validate-body-${var.environment}"
+  rest_api_id                 = aws_api_gateway_rest_api.main.id
+  validate_request_body       = true
+  validate_request_parameters = false
+}
+
+# ==============================================================================
 # /classify-intent Resource and Method
 # ==============================================================================
 
@@ -111,14 +122,6 @@ resource "aws_api_gateway_method" "classify_intent_post" {
   request_models = {
     "application/json" = aws_api_gateway_model.classify_intent_request.name
   }
-}
-
-# Request validator
-resource "aws_api_gateway_request_validator" "body" {
-  name                        = "${var.project_name}-validate-body-${var.environment}"
-  rest_api_id                 = aws_api_gateway_rest_api.main.id
-  validate_request_body       = true
-  validate_request_parameters = false
 }
 
 # Request model
@@ -168,10 +171,6 @@ resource "aws_lambda_permission" "api_gateway_intent_classifier" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
-
-# ==============================================================================
-# CORS Configuration
-# ==============================================================================
 
 # OPTIONS method for CORS preflight
 resource "aws_api_gateway_method" "classify_intent_options" {
@@ -223,6 +222,150 @@ resource "aws_api_gateway_integration_response" "classify_intent_options" {
 }
 
 # ==============================================================================
+# /chat Resource and Method (Chat Orchestrator)
+# ==============================================================================
+
+resource "aws_api_gateway_resource" "chat" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_rest_api.main.root_resource_id
+  path_part   = "chat"
+}
+
+# POST method
+resource "aws_api_gateway_method" "chat_post" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.chat.id
+  http_method   = "POST"
+  authorization = "NONE"
+
+  request_validator_id = aws_api_gateway_request_validator.body.id
+
+  request_models = {
+    "application/json" = aws_api_gateway_model.chat_request.name
+  }
+}
+
+# Request model for chat
+resource "aws_api_gateway_model" "chat_request" {
+  rest_api_id  = aws_api_gateway_rest_api.main.id
+  name         = "ChatRequest"
+  description  = "Request schema for chat endpoint"
+  content_type = "application/json"
+
+  schema = jsonencode({
+    "$schema" = "http://json-schema.org/draft-04/schema#"
+    title     = "ChatRequest"
+    type      = "object"
+    required  = ["message", "tenant_id"]
+    properties = {
+      message = {
+        type      = "string"
+        minLength = 1
+        maxLength = 10000
+      }
+      tenant_id = {
+        type      = "string"
+        minLength = 1
+        maxLength = 100
+      }
+      conversation_id = {
+        type      = "string"
+        maxLength = 100
+      }
+      use_rag = {
+        type    = "boolean"
+        default = true
+      }
+      rag_options = {
+        type = "object"
+        properties = {
+          top_k = {
+            type    = "integer"
+            minimum = 1
+            maximum = 10
+            default = 3
+          }
+          min_score = {
+            type    = "number"
+            minimum = 0
+            maximum = 1
+            default = 0.5
+          }
+        }
+      }
+    }
+  })
+}
+
+# Lambda integration for chat orchestrator
+resource "aws_api_gateway_integration" "chat_lambda" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.chat.id
+  http_method             = aws_api_gateway_method.chat_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.chat_orchestrator_invoke_arn
+}
+
+# Lambda permission for API Gateway to invoke chat orchestrator
+resource "aws_lambda_permission" "api_gateway_chat_orchestrator" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = var.chat_orchestrator_function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
+# OPTIONS method for CORS preflight
+resource "aws_api_gateway_method" "chat_options" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.chat.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "chat_options" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "chat_options" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "chat_options" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_options.http_method
+  status_code = aws_api_gateway_method_response.chat_options.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
+# ==============================================================================
 # API Deployment
 # ==============================================================================
 
@@ -232,11 +375,18 @@ resource "aws_api_gateway_deployment" "main" {
   triggers = {
     # Redeploy when any of these resources change
     redeployment = sha1(jsonencode([
+      # Classify Intent resources
       aws_api_gateway_resource.classify_intent.id,
       aws_api_gateway_method.classify_intent_post.id,
       aws_api_gateway_integration.classify_intent_lambda.id,
       aws_api_gateway_method.classify_intent_options.id,
       aws_api_gateway_integration.classify_intent_options.id,
+      # Chat resources
+      aws_api_gateway_resource.chat.id,
+      aws_api_gateway_method.chat_post.id,
+      aws_api_gateway_integration.chat_lambda.id,
+      aws_api_gateway_method.chat_options.id,
+      aws_api_gateway_integration.chat_options.id,
     ]))
   }
 
@@ -247,6 +397,8 @@ resource "aws_api_gateway_deployment" "main" {
   depends_on = [
     aws_api_gateway_integration.classify_intent_lambda,
     aws_api_gateway_integration.classify_intent_options,
+    aws_api_gateway_integration.chat_lambda,
+    aws_api_gateway_integration.chat_options,
   ]
 }
 

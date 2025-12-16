@@ -211,8 +211,13 @@ module "api_gateway" {
   project_name = var.project_name
   environment  = var.environment
 
+  #Intent Classier
   intent_classifier_invoke_arn    = module.lambda.function_invoke_arns["intent-classifier"]
   intent_classifier_function_name = module.lambda.function_names["intent-classifier"]
+
+  #Chat Orchestrator
+  chat_orchestrator_invoke_arn    = module.lambda.function_invoke_arns["chat-orchestrator"]
+  chat_orchestrator_function_name = module.lambda.function_names["chat-orchestrator"]
 
   log_retention_days     = 7
   api_logging_level      = "INFO"

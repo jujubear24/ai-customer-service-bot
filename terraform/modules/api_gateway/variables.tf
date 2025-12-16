@@ -13,7 +13,7 @@ variable "environment" {
 }
 
 # ==============================================================================
-# Function Integration
+# Function Integration - Intent Classifier
 # ==============================================================================
 
 variable "intent_classifier_invoke_arn" {
@@ -23,6 +23,20 @@ variable "intent_classifier_invoke_arn" {
 
 variable "intent_classifier_function_name" {
   description = "The name of the intent classifier Lambda function"
+  type        = string
+}
+
+# ==============================================================================
+# Function Integration - Chat Orchestrator
+# ==============================================================================
+
+variable "chat_orchestrator_invoke_arn" {
+  description = "The invocation ARN of the chat orchestrator Lambda function"
+  type        = string
+}
+
+variable "chat_orchestrator_function_name" {
+  description = "The name of the chat orchestrator Lambda function"
   type        = string
 }
 

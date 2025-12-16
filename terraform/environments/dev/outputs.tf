@@ -40,6 +40,16 @@ output "api_execution_arn" {
   value       = module.api_gateway.execution_arn
 }
 
+output "chat_endpoint" {
+  description = "Full URL for the /chat endpoint"
+  value       = module.api_gateway.chat_endpoint
+}
+
+output "classify_intent_endpoint" {
+  description = "Full URL for the /classify-intent endpoint"
+  value       = module.api_gateway.classify_intent_endpoint
+}
+
 # ==============================================================================
 # Observability Outputs
 # ==============================================================================

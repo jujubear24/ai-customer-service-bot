@@ -32,6 +32,11 @@ output "classify_intent_endpoint" {
   value       = "${aws_api_gateway_stage.main.invoke_url}/classify-intent"
 }
 
+output "chat_endpoint" {
+  description = "Full URL for the chat endpoint"
+  value       = "${aws_api_gateway_stage.main.invoke_url}/chat"
+}
+
 output "stage_name" {
   description = "Name of the deployed stage"
   value       = aws_api_gateway_stage.main.stage_name

@@ -1,6 +1,7 @@
 import json
 import time
 from typing import Any, cast
+from uuid import uuid4
 
 import boto3
 from aws_lambda_powertools import Logger, Tracer
@@ -101,6 +102,10 @@ class BedrockHandlerClient:
         Generate a response using the Bedrock Handler.
         Retries on ClientErrors (throttling, timeouts).
         """
+
+        if conversation_id is None:
+            conversation_id = f"conv-{uuid4().hex[:12]}"
+
         payload = {
             "user_message": message,
             "rag_context": context,
