@@ -48,8 +48,19 @@ class RAGRetrieverClient:
                 logger.error(f"RAG Retriever error: {response_payload}")
                 return []
 
-            # Parse results
-            results_data = response_payload.get("results", [])
+            # Parse API Gateway-style response if present
+            if "statusCode" in response_payload:
+                if response_payload["statusCode"] != 200:
+                    logger.error(f"RAG Retriever returned status {response_payload['statusCode']}")
+                    return []
+                body = response_payload.get("body", "{}")
+                if isinstance(body, str):
+                    response_payload = json.loads(body)
+            else:
+                response_payload = body
+
+            # Parse results - rag-retriever returns "documents" not "results"
+            results_data = response_payload.get("documents", [])
             documents = []
             for item in results_data:
                 try:
@@ -57,6 +68,7 @@ class RAGRetrieverClient:
                 except Exception as e:
                     logger.warning(f"Failed to parse source document: {e}")
 
+            logger.info(f"RAG retrieved {len(documents)} documents")
             return documents
 
         except Exception:

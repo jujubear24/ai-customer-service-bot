@@ -71,7 +71,7 @@ def test_chat_orchestrator(
             sources = body.get("sources", [])
             print(f"[Info] Sources returned: {len(sources)}")
             for s in sources:
-                print(f"  - {s.get('name')} (score: {s.get('score')})")
+                print(f"  - {s.get('source_name')} (score: {s.get('score')})")
 
         metadata = body.get("metadata", {})
         latency = metadata.get("latency", {})

@@ -46,11 +46,11 @@ class ChatRequest(BaseModel):
 class SourceDocument(BaseModel):
     """Model representing a retrieved source document."""
 
-    name: str = Field(..., description="Document title or name")
+    source_name: str | None = Field(default=None, description="Document title or name")
     content: str = Field(..., description="Text content of the document")
-    source: str = Field(..., description="URI or path to the source")
+    source_uri: str | None = Field(default=None, description="URI or path to the source")
     score: float = Field(..., description="Relevance score")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata")
 
 
 class LatencyMetrics(BaseModel):
