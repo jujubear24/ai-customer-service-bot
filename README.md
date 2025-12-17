@@ -479,7 +479,7 @@ make local-stop
 - **VPC:** Aurora PostgreSQL in private subnets
 - **Secrets:** Environment variables via Terraform (Secrets Manager planned)
 
-> 📋 **TODO:** Create `docs/architecture/security.md` with detailed security documentation.
+See [`docs/architecture/security.md`](docs/architecture/security.md) for detailed security documentation.
 
 ---
 

@@ -12,6 +12,7 @@ This directory contains architecture documentation for the AI Customer Service B
 |----------|-------------|
 | [System Design](./system-design.md) | High-level system architecture, component specifications, security, and observability |
 | [Data Flow](./data-flow.md) | Detailed data flow diagrams for chat, RAG retrieval, Bedrock, intent classification, and DynamoDB access patterns |
+| [Security](./security.md) | Security architecture, controls, encryption, IAM, and compliance |
 | [Build & Deploy Architecture](../build-deploy-architecture.md) | CI/CD pipeline, build process, and deployment workflow |
 
 ---
