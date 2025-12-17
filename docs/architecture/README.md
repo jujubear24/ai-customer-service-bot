@@ -2,6 +2,8 @@
 
 This directory contains architecture documentation for the AI Customer Service Bot.
 
+**Status:** Phase 2 Complete
+
 ---
 
 ## Documents
@@ -9,7 +11,7 @@ This directory contains architecture documentation for the AI Customer Service B
 | Document | Description |
 |----------|-------------|
 | [System Design](./system-design.md) | High-level system architecture, component specifications, security, and observability |
-| [Data Flow](./data-flow.md) | Detailed data flow diagrams for intent classification, context building, and DynamoDB access patterns |
+| [Data Flow](./data-flow.md) | Detailed data flow diagrams for chat, RAG retrieval, Bedrock, intent classification, and DynamoDB access patterns |
 | [Build & Deploy Architecture](../build-deploy-architecture.md) | CI/CD pipeline, build process, and deployment workflow |
 
 ---
@@ -20,8 +22,11 @@ Key architectural decisions are documented in [ADRs](../adr/):
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-007](../adr/007-api-gateway-integration-and-request-validation.md) | API Gateway Integration and Request Validation | Accepted |
-| [ADR-008](../adr/008-dynamodb-schema-design.md) | DynamoDB Schema Design | Accepted |
+| [ADR-007](../adr/ADR-007-api-gateway-integration-and-request-validation.md) | API Gateway Integration and Request Validation | Accepted |
+| [ADR-008](../adr/ADR-008-dynamodb-schema-design.md) | DynamoDB Schema Design | Accepted |
+| [ADR-009](../adr/ADR-009-bedrock-integration.md) | Bedrock Integration | Accepted |
+| [ADR-010](../adr/ADR-010-knowledge-base-rag.md) | Knowledge Base RAG | Accepted |
+| [ADR-011](../adr/ADR-011-orchestrator-pattern.md) | Orchestrator Pattern | Accepted |
 
 ---
 
@@ -46,12 +51,17 @@ mmdc -i system-design.md -o system-design.png
 
 ## Quick Reference
 
-### Current State (Phase 1.2)
+### Current State (Phase 2)
 
 ```bash
-Client → API Gateway → Intent Classifier Lambda
+Client → API Gateway → Chat Orchestrator
+                              ├── RAG Retriever → Knowledge Base → Aurora PostgreSQL
+                              └── Bedrock Handler → Amazon Bedrock (Claude Haiku 4.5)
+
+Additional Endpoints:
+Client → API Gateway → Intent Classifier
                     ↘
-         Context Builder Lambda → DynamoDB
+         Context Builder → DynamoDB
 ```
 
 ### Target State (Full)
@@ -59,12 +69,58 @@ Client → API Gateway → Intent Classifier Lambda
 ```bash
 Client → CloudFront → WAF → API Gateway → Step Functions
                                               ↓
-                    ┌─────────────────────────┼─────────────────────────┐
-                    ↓                         ↓                         ↓
-            Intent Classifier         Context Builder           Bedrock Handler
-                                              ↓                         ↓
-                                          DynamoDB              Amazon Bedrock
+              ┌───────────────────────────────┼───────────────────────────────┐
+              ↓                               ↓                               ↓
+      Intent Classifier              Context Builder                  RAG Retriever
+                                            ↓                               ↓
+                                        DynamoDB                     Knowledge Base
+                                                                            ↓
+              ┌─────────────────────────────────────────────────────────────┘
+              ↓
+      Bedrock Handler → Amazon Bedrock
+              ↓
+      Response Validator → Amazon Comprehend
+              ↓
+      Escalation Router → SQS
 ```
+
+---
+
+## Component Overview
+
+### Phase 2 Components (Deployed)
+
+| Component | Type | Purpose |
+|-----------|------|---------|
+| Chat Orchestrator | Lambda | Coordinates RAG → Bedrock chat flow |
+| RAG Retriever | Lambda | Queries Knowledge Base for relevant documents |
+| Bedrock Handler | Lambda | Generates AI responses via Claude Haiku 4.5 |
+| Knowledge Base | Bedrock KB | Manages document embeddings and retrieval |
+| Aurora PostgreSQL | Database | Vector storage with pgvector extension |
+| Intent Classifier | Lambda | Classifies customer message intents |
+| Context Builder | Lambda | Retrieves and manages conversation history |
+| DynamoDB | Database | Stores conversations and messages |
+| API Gateway | REST API | HTTP endpoints (/chat, /classify-intent) |
+
+### Phase 3+ Components (Planned)
+
+| Component | Type | Purpose |
+|-----------|------|---------|
+| Response Validator | Lambda | Content safety and business rules |
+| Sentiment Analyzer | Lambda | Amazon Comprehend integration |
+| Escalation Router | Lambda | Route to human agents |
+| Step Functions | Orchestration | Full workflow state machine |
+| ElastiCache Redis | Cache | Session caching and rate limiting |
+| DAX | Cache | DynamoDB acceleration |
+
+---
+
+## API Endpoints
+
+| Endpoint | Method | Lambda | Description |
+|----------|--------|--------|-------------|
+| `/chat` | POST | Chat Orchestrator | RAG-enhanced AI chat responses |
+| `/classify-intent` | POST | Intent Classifier | Message intent classification |
 
 ---
 
