@@ -8,10 +8,10 @@ A **production-grade, AI-powered customer service platform** built on AWS with *
 
 This project demonstrates advanced **cloud engineering** and **AI/ML integration** for customer service automation using:
 
-- **AI/ML:** Amazon Bedrock (Claude 3.5 Sonnet), intent classification, sentiment analysis
+- **AI/ML:** Amazon Bedrock (Claude Haiku 4.5), RAG with Knowledge Bases, intent classification
 - **Compute:** AWS Lambda (Python 3.12), Lambda Layers
-- **Orchestration:** AWS Step Functions (planned), API Gateway
-- **Data:** DynamoDB (single-table design)
+- **Orchestration:** Chat Orchestrator, API Gateway
+- **Data:** DynamoDB (single-table design), Aurora PostgreSQL (pgvector), S3
 - **Infrastructure:** Terraform (modular IaC), GitHub Actions CI/CD
 - **Observability:** CloudWatch, X-Ray, custom metrics
 
@@ -30,20 +30,32 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 | REST API Gateway | ✅ Deployed | POST /classify-intent with request validation |
 | Observability | ✅ Deployed | CloudWatch Logs, X-Ray tracing, custom metrics |
 
-### Phase 2: AI Integration 🚧
+### Phase 2: AI Integration ✅
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| Bedrock Handler Lambda | 📋 Planned | Claude integration for response generation |
+| Bedrock Handler Lambda | ✅ Deployed | Claude Haiku 4.5 integration for response generation |
+| RAG Retriever Lambda | ✅ Deployed | Knowledge Base retrieval with semantic search |
+| Chat Orchestrator Lambda | ✅ Deployed | Coordinates RAG → Bedrock flow |
+| Knowledge Base | ✅ Deployed | Bedrock Knowledge Base with Aurora PostgreSQL (pgvector) |
+| S3 Document Store | ✅ Deployed | FAQ and documentation storage for RAG |
+| POST /chat Endpoint | ✅ Deployed | Unified chat API with RAG-enhanced responses |
+
+### Phase 3: Response Validation & Sentiment 📋
+
+| Component | Status | Description |
+|-----------|--------|-------------|
 | Response Validator Lambda | 📋 Planned | Output validation and safety checks |
-| Step Functions Workflow | 📋 Planned | Orchestrate Lambda chain |
+| Sentiment Analyzer | 📋 Planned | Amazon Comprehend integration |
+| Content Safety Checks | 📋 Planned | Business rules engine |
 
 ### Future Phases 📋
 
 | Feature | Description |
 |---------|-------------|
-| RAG Integration | Knowledge base for accurate, contextual answers |
+| Step Functions Workflow | Orchestrate full Lambda chain with error handling |
 | Escalation Router | Priority-based routing to human agents |
+| ElastiCache Redis | Session caching and rate limiting |
 | Real-Time Analytics | OpenSearch dashboards for metrics |
 | Multi-Tenant Support | SaaS-ready with data isolation |
 | WebSocket API | Real-time chat interface |
@@ -52,21 +64,53 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 
 ## 🏗️ Architecture
 
-### Current State (Phase 1)
+### Current State (Phase 2)
 
 ```bash
 ┌─────────────┐
 │   Client    │
 └──────┬──────┘
-       │ POST /classify-intent
+       │ POST /chat
        ▼
-┌──────────────────────────────────────────────┐
-│          API Gateway (REST)                  │
-│     • Request validation                     │
-│     • CORS enabled                           │
-│     • X-Ray tracing                          │
-└──────┬───────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│              API Gateway (REST)                      │
+│     • Request validation (JSON Schema)               │
+│     • CORS enabled                                   │
+│     • X-Ray tracing                                  │
+└──────┬───────────────────────────────────────────────┘
        │
+       ▼
+┌──────────────────────────────────────────────────────┐
+│            Chat Orchestrator Lambda                  │
+│     • Coordinates RAG + Bedrock flow                 │
+│     • Generates conversation IDs                     │
+│     • Aggregates latency metrics                     │
+└──────┬───────────────────┬───────────────────────────┘
+       │                   │
+       ▼                   ▼
+┌──────────────────┐  ┌──────────────────────────────┐
+│  RAG Retriever   │  │     Bedrock Handler          │
+│     Lambda       │  │        Lambda                │
+│  • Query KB      │  │  • Claude Haiku 4.5          │
+│  • Semantic      │  │  • Prompt engineering        │
+│    search        │  │  • Token management          │
+│  • Score filter  │  │  • Context injection         │
+└────────┬─────────┘  └──────────────┬───────────────┘
+         │                           │
+         ▼                           ▼
+┌──────────────────┐  ┌──────────────────────────────┐
+│ Bedrock Knowledge│  │       Amazon Bedrock         │
+│      Base        │  │   (Claude Haiku 4.5)         │
+│  • Aurora PG     │  └──────────────────────────────┘
+│  • pgvector      │
+│  • S3 docs       │
+└──────────────────┘
+
+Additional Endpoints:
+┌─────────────┐
+│   Client    │
+└──────┬──────┘
+       │ POST /classify-intent
        ▼
 ┌──────────────────┐      ┌──────────────────┐
 │ Intent Classifier│      │  Context Builder │
@@ -82,7 +126,6 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
                           │  • Conversations │
                           │  • Messages      │
                           │  • User profiles │
-                          │  • GSI1, GSI2    │
                           └──────────────────┘
 ```
 
@@ -103,7 +146,7 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 ┌──────▼──────────────────────────────────────────┐
 │         Step Functions State Machine            │
 │  ┌─────────────────────────────────────────┐   │
-│  │ Intent → Context → Bedrock → Validate   │   │
+│  │ Intent → Context → RAG → Bedrock → Val  │   │
 │  └─────────────────────────────────────────┘   │
 └──────┬──────────────────────────────────────────┘
        │
@@ -118,6 +161,53 @@ See [`docs/architecture/`](docs/architecture/) for detailed design documents.
 ---
 
 ## 🧩 Components
+
+### Chat Orchestrator Lambda (NEW)
+
+Orchestrates the complete chat flow, coordinating RAG retrieval and AI response generation.
+
+- **Endpoint:** `POST /chat`
+- **Features:**
+  - Invokes RAG Retriever for context retrieval
+  - Invokes Bedrock Handler for response generation
+  - Auto-generates conversation IDs
+  - Aggregates latency metrics (RAG, Bedrock, total)
+  - Resilient with retry logic (tenacity)
+- **Performance:** 512 MB memory, ~8-10s total latency (cold), ~3-5s (warm)
+
+### RAG Retriever Lambda (NEW)
+
+Retrieves relevant documents from the Knowledge Base for context-aware responses.
+
+- **Trigger:** Invoked by Chat Orchestrator
+- **Features:**
+  - Semantic search against Bedrock Knowledge Base
+  - Configurable top_k and min_score filtering
+  - Returns scored document chunks with source attribution
+  - Aurora PostgreSQL with pgvector for embeddings
+- **Performance:** 256 MB memory, ~1-2s retrieval time
+
+### Bedrock Handler Lambda (NEW)
+
+Generates AI responses using Amazon Bedrock Claude models.
+
+- **Trigger:** Invoked by Chat Orchestrator
+- **Features:**
+  - Claude Haiku 4.5 integration (us.anthropic.claude-haiku-4-5-20251001-v1:0)
+  - Prompt engineering with system prompts
+  - RAG context injection
+  - Token usage tracking and metrics
+  - Configurable temperature, max_tokens, top_p
+- **Performance:** 512 MB memory, ~2-4s generation time
+
+### Knowledge Base (NEW)
+
+Bedrock Knowledge Base with Aurora PostgreSQL for vector storage.
+
+- **Vector Store:** Aurora PostgreSQL Serverless v2 with pgvector
+- **Document Store:** S3 bucket with FAQ markdown files
+- **Chunking:** Semantic chunking for optimal retrieval
+- **Sync:** Manual sync via `scripts/sync-knowledge-base.sh`
 
 ### Intent Classifier Lambda
 
@@ -158,7 +248,7 @@ Single-table design storing conversations, messages, and user profiles.
   - GSI2: Query conversations by status (for escalations)
 - **Streams:** Enabled for future event processing
 
-See [ADR-008](docs/adr/008-dynamodb-schema-design.md) for schema design details.
+See [ADR-008](docs/adr/ADR-008-dynamodb-schema-design.md) for schema design details.
 
 ### Shared Lambda Layer
 
@@ -223,7 +313,6 @@ terraform init
 ```bash
 # Build Lambda artifacts
 ./scripts/build-lambdas.sh
-./scripts/build-lambda-layer.sh
 
 # Deploy infrastructure
 make tf-apply-dev
@@ -232,7 +321,19 @@ make tf-apply-dev
 ### 6️⃣ Test the API
 
 ```bash
-curl -X POST https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/dev/classify-intent \
+# Get the chat endpoint
+CHAT_URL=$(cd terraform/environments/dev && terraform output -raw chat_endpoint)
+
+# Test the /chat endpoint (RAG-enhanced AI response)
+curl -X POST "$CHAT_URL" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "How do I reset my password?",
+    "tenant_id": "test-tenant"
+  }'
+
+# Test intent classification
+curl -X POST "$(cd terraform/environments/dev && terraform output -raw classify_intent_endpoint)" \
   -H "Content-Type: application/json" \
   -d '{"message": "I need to speak to a manager"}'
 ```
@@ -244,40 +345,57 @@ curl -X POST https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/dev/classif
 ```bash
 ai-customer-service-bot/
 ├── .github/                    # GitHub Actions workflows
-├── terraform/                  # Infrastructure as Code
-│   ├── modules/
-│   │   ├── lambda/             # Lambda function module (dynamic for_each)
-│   │   ├── api_gateway/        # REST API configuration
-│   │   ├── dynamodb/           # DynamoDB table and GSIs
-│   │   └── observability/      # CloudWatch, X-Ray, alarms
-│   └── environments/
-│       └── dev/                # Development environment
+├── docs/
+│   ├── adr/                    # Architecture Decision Records (ADR-001 to ADR-011)
+│   ├── architecture/           # System design docs
+│   │   ├── data-flow.md
+│   │   └── system-design.md
+│   ├── guides/                 # Implementation guides
+│   └── runbooks/               # Operational guides
+├── knowledge-base-docs/        # RAG source documents
+│   ├── docs/policies/          # Policy documents
+│   └── faqs/                   # FAQ markdown files
 ├── lambda/
 │   ├── functions/
-│   │   ├── intent-classifier/  # ✅ Intent classification Lambda
+│   │   ├── bedrock-handler/    # ✅ AI response generation
+│   │   ├── chat-orchestrator/  # ✅ Chat flow orchestration
 │   │   ├── context-builder/    # ✅ Context retrieval Lambda
-│   │   ├── bedrock-handler/    # 📋 AI response generation (planned)
+│   │   ├── escalation-router/  # 📋 Escalation handling (planned)
+│   │   ├── intent-classifier/  # ✅ Intent classification Lambda
+│   │   ├── metrics-publisher/  # 📋 Custom metrics (planned)
+│   │   ├── rag-retriever/      # ✅ Knowledge Base retrieval
 │   │   └── response-validator/ # 📋 Output validation (planned)
-│   └── layers/
-│       └── common/             # Shared Lambda layer
-│           └── python/shared/
-│               ├── models/
-│               │   └── dynamodb.py    # Entity models
-│               ├── repositories/
-│               │   └── dynamodb.py    # Data access layer
-│               ├── types.py           # Shared type definitions
-│               └── exceptions.py      # Custom exceptions
-├── web/                        # Next.js frontend (planned)
-├── tests/                      # Integration and E2E tests
+│   ├── layers/
+│   │   └── common/             # Shared Lambda layer
+│   └── step-functions/         # Step Functions definitions (planned)
 ├── scripts/
-│   ├── setup.sh                # Initial project setup
+│   ├── build-lambda-layer.sh   # Build shared layer
 │   ├── build-lambdas.sh        # Build Lambda artifacts
-│   └── build-lambda-layer.sh   # Build shared layer
-├── docs/
-│   ├── adr/                    # Architecture Decision Records
-│   ├── architecture/           # System design docs
-│   └── runbooks/               # Operational guides
-└── Makefile                    # Common commands
+│   ├── setup.sh                # Initial project setup
+│   ├── sync-knowledge-base.sh  # Sync KB documents to S3
+│   ├── test_chat_orchestrator.py  # E2E test script
+│   └── ...                     # Other utility scripts
+├── terraform/
+│   ├── backend_bootstrap/      # S3/DynamoDB state backend setup
+│   ├── environments/
+│   │   ├── dev/                # Development environment
+│   │   ├── staging/            # Staging environment
+│   │   └── prod/               # Production environment
+│   └── modules/
+│       ├── api_gateway/        # REST API configuration
+│       ├── bedrock/            # Bedrock IAM and config
+│       ├── dynamodb/           # DynamoDB table and GSIs
+│       ├── knowledge_base/     # Bedrock KB + Aurora PostgreSQL
+│       ├── lambda/             # Lambda function module
+│       ├── networking/         # VPC, subnets, security groups
+│       └── observability/      # CloudWatch, X-Ray, alarms
+├── tests/
+│   ├── e2e/                    # End-to-end tests
+│   ├── integration/            # Integration tests
+│   ├── load/                   # Load/performance tests
+│   └── unit/                   # Unit tests
+├── Makefile                    # Common commands
+└── pyproject.toml              # Root Python config
 ```
 
 ---
@@ -290,9 +408,15 @@ ai-customer-service-bot/
 # Unit tests (Lambda functions)
 cd lambda/functions/intent-classifier && uv run pytest -v
 cd lambda/functions/context-builder && uv run pytest -v
+cd lambda/functions/bedrock-handler && uv run pytest -v
+cd lambda/functions/rag-retriever && uv run pytest -v
+cd lambda/functions/chat-orchestrator && uv run pytest -v
 
 # All tests with coverage
 make test-unit
+
+# E2E test for chat orchestrator
+python scripts/test_chat_orchestrator.py
 
 # Integration tests (when implemented)
 make test-integration
@@ -330,19 +454,32 @@ make local-stop
 
 - **CloudWatch Logs:** 7-day retention, structured JSON logging
 - **X-Ray Tracing:** Distributed request tracing across all Lambdas
-- **Custom Metrics:** Classification counts, latency percentiles, error rates
-- **CloudWatch Alarms:** DynamoDB throttling, Lambda errors
+- **Custom Metrics:** Classification counts, latency percentiles, error rates, token usage
+- **CloudWatch Alarms:** DynamoDB throttling, Lambda errors, Bedrock throttling
+
+### Key Metrics (Phase 2)
+
+| Metric | Source | Description |
+|--------|--------|-------------|
+| BedrockInvocations | Bedrock Handler | Total AI invocations |
+| BedrockInputTokens | Bedrock Handler | Input token usage |
+| BedrockOutputTokens | Bedrock Handler | Output token usage |
+| BedrockLatency | Bedrock Handler | AI response time |
+| DocumentsRetrieved | RAG Retriever | RAG documents found |
+| RetrievalLatency | RAG Retriever | KB query time |
+| AverageRelevanceScore | RAG Retriever | RAG result quality |
 
 ---
 
 ## 🔒 Security
 
-- **Encryption:** Server-side encryption (SSE) for DynamoDB
+- **Encryption:** Server-side encryption (SSE) for DynamoDB, S3, Aurora
 - **IAM:** Least-privilege roles for all Lambda functions
 - **API Gateway:** Request validation, throttling (100 burst, 50 req/sec)
+- **VPC:** Aurora PostgreSQL in private subnets
 - **Secrets:** Environment variables via Terraform (Secrets Manager planned)
 
-See [`docs/architecture/security.md`](docs/architecture/security.md) for details.
+> 📋 **TODO:** Create `docs/architecture/security.md` with detailed security documentation.
 
 ---
 
@@ -354,9 +491,12 @@ See [`docs/architecture/security.md`](docs/architecture/security.md) for details
 | DynamoDB (on-demand) | $1-5 |
 | API Gateway | $1-3 |
 | CloudWatch | $1-3 |
-| **Total** | **~$5-15** |
+| Aurora Serverless v2 | $15-50 |
+| Bedrock (Claude Haiku) | $5-20 |
+| S3 | <$1 |
+| **Total** | **~$25-85** |
 
-Costs scale with usage. Production estimates available after Phase 2.
+Costs scale with usage. Aurora Serverless v2 is the primary cost driver in dev.
 
 ---
 
@@ -370,8 +510,11 @@ Costs scale with usage. Production estimates available after Phase 2.
 
 | ADR | Title |
 |-----|-------|
-| [ADR-007](docs/adr/007-api-gateway-integration-and-request-validation.md) | API Gateway Integration |
-| [ADR-008](docs/adr/008-dynamodb-schema-design.md) | DynamoDB Schema Design |
+| [ADR-007](docs/adr/ADR-007-api-gateway-integration-and-request-validation.md) | API Gateway Integration |
+| [ADR-008](docs/adr/ADR-008-dynamodb-schema-design.md) | DynamoDB Schema Design |
+| [ADR-009](docs/adr/ADR-009-bedrock-integration.md) | Bedrock Integration |
+| [ADR-010](docs/adr/ADR-010-knowledge-base-rag.md) | Knowledge Base RAG |
+| [ADR-011](docs/adr/ADR-011-orchestrator-pattern.md) | Orchestrator Pattern |
 
 ---
 
