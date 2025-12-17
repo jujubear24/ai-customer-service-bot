@@ -1,13 +1,254 @@
 # Data Flow
 
-**Last Updated:** November 2025
-**Status:** Phase 1.2 Complete
+**Last Updated:** December 17, 2025
+**Status:** Phase 2 Complete
 
 ---
 
 ## Overview
 
-This document describes the data flows within the AI Customer Service Bot, focusing on how customer messages are processed and how conversation context is managed.
+This document describes the data flows within the AI Customer Service Bot, focusing on how customer messages are processed, how RAG retrieval works, and how AI responses are generated.
+
+---
+
+## Chat Flow (Primary)
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant AG as API Gateway
+    participant CO as Chat Orchestrator
+    participant RR as RAG Retriever
+    participant KB as Knowledge Base
+    participant BH as Bedrock Handler
+    participant BR as Amazon Bedrock
+    participant CW as CloudWatch
+
+    C->>AG: POST /chat<br/>{"message": "...", "tenant_id": "..."}
+
+    Note over AG: Request Validation<br/>(JSON Schema)
+
+    AG->>CO: Invoke Lambda (AWS_PROXY)
+
+    Note over CO: 1. Parse request body<br/>2. Validate with Pydantic<br/>3. Generate conversation_id
+
+    CO->>RR: Invoke Lambda<br/>{"query": "...", "tenant_id": "...", "limit": 3}
+
+    RR->>KB: Retrieve (Bedrock Agent Runtime)
+    KB-->>RR: Retrieval results
+
+    Note over RR: Filter by min_score<br/>Parse documents
+
+    RR-->>CO: {documents: [...], scores: [...]}
+    RR->>CW: Log retrieval metrics
+
+    Note over CO: Build context from<br/>RAG documents
+
+    CO->>BH: Invoke Lambda<br/>{"user_message": "...", "rag_context": [...]}
+
+    Note over BH: 1. Build system prompt<br/>2. Inject RAG context<br/>3. Construct messages
+
+    BH->>BR: Converse API<br/>(Claude Haiku 4.5)
+    BR-->>BH: AI Response + usage
+
+    Note over BH: Extract response text<br/>Track token usage
+
+    BH-->>CO: {response_text, model_id, tokens}
+    BH->>CW: Log Bedrock metrics
+
+    Note over CO: Assemble ChatResponse<br/>with sources & latency
+
+    CO->>CW: Log request metrics
+    CO-->>AG: ChatResponse
+    AG-->>C: HTTP 200 + JSON body
+```
+
+### Request/Response Format
+
+**Request:**
+
+```json
+{
+  "message": "How do I reset my password?",
+  "tenant_id": "acme-corp",
+  "conversation_id": "conv-abc123",
+  "use_rag": true,
+  "rag_options": {
+    "top_k": 3,
+    "min_score": 0.5
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "conversation_id": "conv-abc123",
+  "message_id": "msg-xyz789",
+  "response": "To reset your password, click 'Forgot Password' on the login page...",
+  "sources": [
+    {
+      "source_name": "general-faqs.md",
+      "content": "### How do I reset my password?\nClick 'Forgot Password'...",
+      "source_uri": "s3://bucket/faqs/general-faqs.md",
+      "score": 0.85,
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "rag_documents_used": 3,
+    "rag_skipped": false,
+    "latency": {
+      "rag_ms": 1200.5,
+      "bedrock_ms": 2500.3,
+      "total_ms": 3700.8
+    }
+  }
+}
+```
+
+---
+
+## RAG Retrieval Flow
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CO as Chat Orchestrator
+    participant RR as RAG Retriever
+    participant KBA as Bedrock Agent Runtime
+    participant KB as Knowledge Base
+    participant APG as Aurora PostgreSQL
+    participant S3 as S3 Documents
+    participant CW as CloudWatch
+
+    CO->>RR: Invoke<br/>{"query": "...", "tenant_id": "...", "limit": 5}
+
+    Note over RR: Validate request<br/>with Pydantic
+
+    RR->>KBA: retrieve()<br/>knowledgeBaseId, query, top_k
+
+    KBA->>KB: Semantic search
+    KB->>APG: Vector similarity query<br/>(pgvector)
+    APG-->>KB: Matching chunks + scores
+
+    KB->>S3: Fetch document metadata
+    S3-->>KB: Document info
+
+    KB-->>KBA: Retrieval results
+    KBA-->>RR: {retrievalResults: [...]}
+
+    Note over RR: 1. Filter by min_score<br/>2. Parse to RetrievedDocument<br/>3. Calculate avg score
+
+    RR->>CW: Publish metrics<br/>DocumentsRetrieved, Latency
+
+    RR-->>CO: RetrievalResponse
+```
+
+### Request/Response Format
+
+**Request:**
+
+```json
+{
+  "query": "How do I reset my password?",
+  "tenant_id": "acme-corp",
+  "top_k": 5,
+  "min_score": 0.5,
+  "retrieval_type": "SEMANTIC"
+}
+```
+
+**Response:**
+
+```json
+{
+  "documents": [
+    {
+      "content": "### How do I reset my password?\nClick 'Forgot Password'...",
+      "score": 0.85,
+      "source_uri": "s3://bucket/faqs/general-faqs.md",
+      "source_name": "general-faqs.md",
+      "metadata": {}
+    }
+  ],
+  "query": "How do I reset my password?",
+  "total_found": 5,
+  "retrieval_time_ms": 1200.5
+}
+```
+
+---
+
+## Bedrock Handler Flow
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CO as Chat Orchestrator
+    participant BH as Bedrock Handler
+    participant BR as Amazon Bedrock
+    participant CW as CloudWatch
+
+    CO->>BH: Invoke<br/>{"user_message": "...", "rag_context": [...]}
+
+    Note over BH: 1. Validate request<br/>2. Build system prompt<br/>3. Build messages array
+
+    BH->>BH: Inject RAG context<br/>into system prompt
+
+    BH->>BR: Converse API<br/>model, messages, system, config
+
+    Note over BR: Claude Haiku 4.5<br/>generates response
+
+    BR-->>BH: {output, usage, stopReason}
+
+    Note over BH: 1. Extract response text<br/>2. Calculate latency<br/>3. Track token usage
+
+    BH->>CW: Publish metrics<br/>Invocations, Tokens, Latency
+
+    BH-->>CO: BedrockResponse
+```
+
+### Request/Response Format
+
+**Request:**
+
+```json
+{
+  "user_message": "How do I reset my password?",
+  "rag_context": [
+    "### How do I reset my password?\nClick 'Forgot Password' on the login page..."
+  ],
+  "conversation_id": "conv-abc123",
+  "tenant_id": "acme-corp",
+  "max_tokens": 1024,
+  "temperature": 0.7
+}
+```
+
+**Response:**
+
+```json
+{
+  "conversation_id": "conv-abc123",
+  "response_text": "To reset your password, follow these steps:\n1. Go to the login page...",
+  "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "input_tokens": 450,
+  "output_tokens": 120,
+  "latency_ms": 2500,
+  "stop_reason": "end_turn",
+  "timestamp": "2025-12-15T10:30:00Z"
+}
+```
 
 ---
 
@@ -264,7 +505,7 @@ Max messages before truncation: ~160 messages
 
 ---
 
-## Future: Full Conversation Flow
+## Future: Step Functions Orchestration
 
 ### End-to-End Flow (Target State)
 
@@ -276,6 +517,7 @@ sequenceDiagram
     participant SF as Step Functions
     participant IC as Intent Classifier
     participant CB as Context Builder
+    participant RR as RAG Retriever
     participant BH as Bedrock Handler
     participant RV as Response Validator
     participant DDB as DynamoDB
@@ -294,6 +536,9 @@ sequenceDiagram
         CB->>DDB: Get conversation history
         DDB-->>CB: Messages
         CB-->>SF: {context, tokens}
+
+        SF->>RR: Retrieve RAG Context
+        RR-->>SF: {documents, scores}
 
         SF->>BH: Generate Response
         BH->>BR: Invoke Claude
@@ -321,7 +566,8 @@ stateDiagram-v2
     EvaluateIntent --> BuildContext: normal
     EvaluateIntent --> InitiateEscalation: escalation_needed
 
-    BuildContext --> GenerateResponse
+    BuildContext --> RetrieveRAG
+    RetrieveRAG --> GenerateResponse
     GenerateResponse --> ValidateResponse
 
     ValidateResponse --> SaveResponse: valid
@@ -346,15 +592,62 @@ stateDiagram-v2
 sequenceDiagram
     participant C as Client
     participant AG as API Gateway
-    participant IC as Intent Classifier
+    participant CO as Chat Orchestrator
 
-    C->>AG: POST /classify-intent<br/>{"message": ""}
-    AG->>IC: Invoke Lambda
+    C->>AG: POST /chat<br/>{"message": ""}
+    AG->>CO: Invoke Lambda
 
-    Note over IC: Validation fails:<br/>message cannot be empty
+    Note over CO: Validation fails:<br/>message cannot be empty
 
-    IC-->>AG: HTTP 400<br/>{"error": "ValidationError"}
+    CO-->>AG: HTTP 400<br/>{"error": "ValidationError"}
     AG-->>C: HTTP 400
+```
+
+### RAG Retrieval Error (Non-Fatal)
+
+```mermaid
+sequenceDiagram
+    participant CO as Chat Orchestrator
+    participant RR as RAG Retriever
+    participant BH as Bedrock Handler
+    participant CW as CloudWatch
+
+    CO->>RR: Invoke
+    RR-->>CO: Error (timeout/unavailable)
+
+    CO->>CW: Log RAG error (warning)
+
+    Note over CO: Continue without RAG context
+
+    CO->>BH: Invoke (empty rag_context)
+    BH-->>CO: Response (without RAG)
+
+    CO-->>CO: Return response<br/>(rag_skipped: true)
+```
+
+### Bedrock Error (Fatal)
+
+```mermaid
+sequenceDiagram
+    participant CO as Chat Orchestrator
+    participant BH as Bedrock Handler
+    participant BR as Amazon Bedrock
+    participant CW as CloudWatch
+
+    CO->>BH: Invoke
+
+    BH->>BR: Converse API
+    BR-->>BH: Error (throttled/model error)
+
+    BH->>BH: Retry with backoff (3 attempts)
+    BH->>BR: Retry...
+    BR-->>BH: Error persists
+
+    BH->>CW: Log error + metrics
+    BH-->>CO: Error response
+
+    CO->>CW: Log error
+    CO-->>CO: Return error to client
 ```
 
 ### DynamoDB Error
@@ -426,8 +719,9 @@ flowchart LR
 flowchart LR
     subgraph Request Path
         AG[API Gateway]
-        LAMBDA[Lambda]
-        DDB[DynamoDB]
+        CO[Chat Orchestrator]
+        RR[RAG Retriever]
+        BH[Bedrock Handler]
     end
 
     subgraph X-Ray
@@ -436,8 +730,9 @@ flowchart LR
     end
 
     AG -->|segment| TRACES
-    LAMBDA -->|segment| TRACES
-    DDB -->|segment| TRACES
+    CO -->|segment| TRACES
+    RR -->|segment| TRACES
+    BH -->|segment| TRACES
     TRACES --> MAP
 ```
 
@@ -446,5 +741,8 @@ flowchart LR
 ## Related Documentation
 
 - [System Design](./system-design.md) — Overall architecture
-- [ADR-008: DynamoDB Schema](../adr/008-dynamodb-schema-design.md) — Schema details
+- [ADR-008: DynamoDB Schema](../adr/ADR-008-dynamodb-schema-design.md) — Schema details
+- [ADR-009: Bedrock Integration](../adr/ADR-009-bedrock-integration.md) — Bedrock design
+- [ADR-010: Knowledge Base RAG](../adr/ADR-010-knowledge-base-rag.md) — RAG architecture
+- [ADR-011: Orchestrator Pattern](../adr/ADR-011-orchestrator-pattern.md) — Orchestration design
 - [Build & Deploy Architecture](../build-deploy-architecture.md) — Deployment flows
