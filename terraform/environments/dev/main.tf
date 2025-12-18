@@ -170,8 +170,64 @@ module "lambda" {
       additional_policy_arns       = []
       additional_policy_statements = []
     }
+
+    response-validator = {
+      handler     = "handler.lambda_handler"
+      runtime     = "python3.12"
+      timeout     = 30
+      memory_size = 512
+      environment_variables = {
+        ENABLE_PII_DETECTION     = "true"
+        ENABLE_PROFANITY_CHECK   = "true"
+        ENABLE_BUSINESS_RULES    = "true"
+        ENABLE_LENGTH_CHECK      = "true"
+        MIN_RESPONSE_LENGTH      = "20"
+        MAX_RESPONSE_LENGTH      = "2000"
+        TRUNCATE_LONG_RESPONSES  = "true"
+        STOP_ON_CRITICAL_FAILURE = "true"
+        USE_FALLBACK_ON_BLOCK    = "true"
+        REDACT_PII_IN_RESPONSE   = "true"
+        FAIL_OPEN_ON_ERROR       = "false"
+      }
+      enable_xray                  = true
+      additional_layers            = [module.lambda_layer.layer_arn]
+      additional_policy_arns       = []
+      additional_policy_statements = []
+    }
+
   }
 }
+
+# ==============================================================================
+# Response Validator Permissions
+# ==============================================================================
+
+resource "aws_iam_policy" "response_validator_comprehend_policy" {
+  name        = "${var.project_name}-${var.environment}-response-validator-comprehend"
+  description = "Allow Response Validator to use Amazon Comprehend for PII detection"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ComprehendPII"
+        Effect = "Allow"
+        Action = [
+          "comprehend:DetectPiiEntities",
+          "comprehend:ContainsPiiEntities",
+          "comprehend:DetectSentiment"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "response_validator_comprehend_attachment" {
+  role       = module.lambda.role_names["response-validator"]
+  policy_arn = aws_iam_policy.response_validator_comprehend_policy.arn
+}
+
 
 # ==============================================================================
 # Orchestrator Permissions (Avoid Circular Dependencies)
@@ -245,6 +301,7 @@ module "observability" {
     module.lambda.bedrock_handler_function_name,
     module.lambda.rag_retriever_function_name,
     module.lambda.chat_orchestrator_function_name,
+    module.lambda.response_validator_function_name,
   ]
 
   log_retention_days = 7

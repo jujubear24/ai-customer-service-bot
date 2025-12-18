@@ -106,3 +106,18 @@ output "chat_orchestrator_invoke_arn" {
   description = "Chat Orchestrator function invoke ARN"
   value       = try(aws_lambda_function.this["chat-orchestrator"].invoke_arn, null)
 }
+
+output "response_validator_function_name" {
+  description = "Response Validator function name"
+  value       = try(aws_lambda_function.this["response-validator"].function_name, null)
+}
+
+output "response_validator_function_arn" {
+  description = "Response Validator function ARN"
+  value       = try(aws_lambda_function.this["response-validator"].arn, null)
+}
+
+output "response_validator_invoke_arn" {
+  description = "Response Validator function invoke ARN"
+  value       = try(aws_lambda_function.this["response-validator"].invoke_arn, null)
+}
