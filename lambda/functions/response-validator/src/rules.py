@@ -591,7 +591,7 @@ class RulesEngine:
                     extra={
                         "rule_id": rule.rule_id,
                         "severity": result.severity.value,
-                        "message": result.message,
+                        "rule_message": result.message,
                     },
                 )
                 break
