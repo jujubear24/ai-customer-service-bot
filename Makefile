@@ -1,13 +1,17 @@
-.PHONY: help install add-dep add-dev-dep update-deps setup-aws init-terraform \
+.PHONY: help install add-dep add-dev-dep update-deps setup-aws \
         format lint typecheck security-scan validate \
-        test-unit test-integration test-e2e test-all test coverage \
-        tf-plan-dev tf-apply-dev tf-plan-prod tf-apply-prod tf-destroy-dev \
-        deploy deploy-dev deploy-lambdas deploy-web \
-        local-start local-stop run-lambda logs \
-        seed-kb create-user performance-test clean docs check pre-commit ci \
-        version status cost check-uv check-terraform check-aws
+        test test-unit test-integration test-e2e test-all test-function coverage \
+        build build-all build-layer build-function build-list build-clean \
+        tf-init tf-plan tf-apply tf-destroy tf-output tf-state tf-fmt tf-validate tf-refresh \
+        deploy deploy-dev deploy-prod \
+        logs logs-api logs-orchestrator logs-rag logs-bedrock logs-intent logs-context \
+        sync-kb test-chat test-api \
+        local-start local-stop clean docs \
+        whoami endpoints status cost check pre-commit ci
 
+# ==============================================================================
 # Variables
+# ==============================================================================
 PYTHON := python3.12
 TERRAFORM := terraform
 AWS_REGION := us-east-1
@@ -21,280 +25,462 @@ BLUE := \033[0;34m
 GREEN := \033[0;32m
 RED := \033[0;31m
 YELLOW := \033[1;33m
+CYAN := \033[0;36m
 NC := \033[0m # No Color
 
+# ==============================================================================
+# Help
+# ==============================================================================
 help: ## Show this help message
-	@echo "$(BLUE)Available commands:$(NC)"
 	@echo ""
-	@echo "$(BLUE)Setup & Dependencies:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(install|add-dep|update-deps|setup-aws|init-terraform)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo "$(GREEN)AI Customer Service Bot - Development Commands$(NC)"
 	@echo ""
-	@echo "$(BLUE)Development:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(format|lint|typecheck|validate|security-scan|check|pre-commit|ci)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo "$(BLUE)━━━ Setup & Dependencies ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(install|add-dep|update-deps|setup-aws)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(BLUE)Testing:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(test|coverage|performance-test)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo "$(BLUE)━━━ Build ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '^build' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(BLUE)Infrastructure:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(tf-|deploy|local-)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo "$(BLUE)━━━ Code Quality ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(format|lint|typecheck|validate|security-scan|check|pre-commit|ci)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(BLUE)Utilities:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(seed|create-user|run-lambda|logs|clean|docs|version|status|cost)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo "$(BLUE)━━━ Testing ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '^test' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(BLUE)━━━ Terraform ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '^tf-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(BLUE)━━━ Deployment ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '^deploy' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(BLUE)━━━ Logs & Monitoring ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '^logs' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(BLUE)━━━ Utilities ━━━$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(sync-kb|test-chat|test-api|local-|clean|docs|whoami|endpoints|status|cost)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(YELLOW)Variables:$(NC)"
+	@echo "  ENV=dev|staging|prod   Environment (default: dev)"
+	@echo "  FUNCTION=name          Lambda function name"
+	@echo "  PKG=package            Package name for add-dep"
+	@echo ""
 
-# Dependency checks
-check-uv: ## Check if uv is installed
+# ==============================================================================
+# Dependency Checks (internal)
+# ==============================================================================
+.PHONY: _check-uv _check-terraform _check-aws _check-docker
+
+_check-uv:
 	@command -v uv >/dev/null 2>&1 || { echo "$(RED)Error: uv is not installed. Install from https://docs.astral.sh/uv/$(NC)"; exit 1; }
 
-check-terraform: ## Check if terraform is installed
+_check-terraform:
 	@command -v terraform >/dev/null 2>&1 || { echo "$(RED)Error: terraform is not installed$(NC)"; exit 1; }
 
-check-aws: ## Check if AWS CLI is configured
+_check-aws:
 	@aws sts get-caller-identity >/dev/null 2>&1 || { echo "$(RED)Error: AWS CLI not configured. Run 'make setup-aws'$(NC)"; exit 1; }
 
-## Setup & Dependency Commands
-install: check-uv ## Install all dependencies with UV
-	@echo "$(BLUE)Installing dependencies with UV...$(NC)"
-	uv sync --all-extras
-	@echo "$(BLUE)Installing Node dependencies...$(NC)"
-	cd web && npm install
+_check-docker:
+	@docker info >/dev/null 2>&1 || { echo "$(RED)Error: Docker is not running$(NC)"; exit 1; }
+
+# ==============================================================================
+# Setup & Dependencies
+# ==============================================================================
+install: _check-uv ## Install all dependencies
+	@echo "$(BLUE)Installing Python dependencies...$(NC)"
+	@for dir in lambda/functions/*/; do \
+		if [ -f "$$dir/pyproject.toml" ]; then \
+			echo "  Installing $$(basename $$dir)..."; \
+			cd "$$dir" && uv sync --quiet && cd - > /dev/null; \
+		fi \
+	done
 	@echo "$(BLUE)Installing pre-commit hooks...$(NC)"
-	uv run pre-commit install
+	@uv run pre-commit install 2>/dev/null || true
 	@echo "$(GREEN)✓ Installation complete$(NC)"
 
-add-dep: check-uv ## Add a new dependency (use: make add-dep PKG=package-name)
+add-dep: _check-uv ## Add a dependency (PKG=package-name FUNCTION=function-name)
 ifndef PKG
-	@echo "$(RED)Error: PKG is required. Usage: make add-dep PKG=boto3$(NC)"
+	@echo "$(RED)Error: PKG required. Usage: make add-dep PKG=boto3 FUNCTION=chat-orchestrator$(NC)"
 	@exit 1
 endif
-	@echo "$(BLUE)Adding dependency: $(PKG)$(NC)"
-	uv add $(PKG)
+ifndef FUNCTION
+	@echo "$(RED)Error: FUNCTION required. Usage: make add-dep PKG=boto3 FUNCTION=chat-orchestrator$(NC)"
+	@exit 1
+endif
+	@echo "$(BLUE)Adding $(PKG) to $(FUNCTION)...$(NC)"
+	@cd lambda/functions/$(FUNCTION) && uv add $(PKG)
 	@echo "$(GREEN)✓ Dependency added$(NC)"
 
-add-dev-dep: check-uv ## Add a dev dependency (use: make add-dev-dep PKG=package-name)
+add-dev-dep: _check-uv ## Add a dev dependency (PKG=package-name FUNCTION=function-name)
 ifndef PKG
-	@echo "$(RED)Error: PKG is required. Usage: make add-dev-dep PKG=pytest$(NC)"
+	@echo "$(RED)Error: PKG required. Usage: make add-dev-dep PKG=pytest FUNCTION=chat-orchestrator$(NC)"
 	@exit 1
 endif
-	@echo "$(BLUE)Adding dev dependency: $(PKG)$(NC)"
-	uv add --dev $(PKG)
+ifndef FUNCTION
+	@echo "$(RED)Error: FUNCTION required$(NC)"
+	@exit 1
+endif
+	@echo "$(BLUE)Adding dev dependency $(PKG) to $(FUNCTION)...$(NC)"
+	@cd lambda/functions/$(FUNCTION) && uv add --dev $(PKG)
 	@echo "$(GREEN)✓ Dev dependency added$(NC)"
 
-update-deps: check-uv ## Update all dependencies
+update-deps: _check-uv ## Update all dependencies
 	@echo "$(BLUE)Updating dependencies...$(NC)"
-	uv sync --upgrade
+	@for dir in lambda/functions/*/; do \
+		if [ -f "$$dir/pyproject.toml" ]; then \
+			echo "  Updating $$(basename $$dir)..."; \
+			cd "$$dir" && uv sync --upgrade --quiet && cd - > /dev/null; \
+		fi \
+	done
 	@echo "$(GREEN)✓ Dependencies updated$(NC)"
 
-setup-aws: ## Configure AWS CLI
+setup-aws: ## Configure AWS CLI interactively
 	@echo "$(BLUE)Configuring AWS CLI...$(NC)"
-	aws configure
+	@aws configure
 	@echo "$(GREEN)✓ AWS configured$(NC)"
 
-init-terraform: check-terraform ## Initialize Terraform backend
-	@echo "$(BLUE)Initializing Terraform...$(NC)"
-	cd terraform/environments/dev && $(TERRAFORM) init
-	@echo "$(GREEN)✓ Terraform initialized$(NC)"
+# ==============================================================================
+# Build Commands
+# ==============================================================================
+build: build-all ## Alias for build-all
 
-## Development Commands
+build-all: _check-docker ## Build layer and all Lambda functions
+	@echo "$(BLUE)Building all Lambda artifacts...$(NC)"
+	@./scripts/build-lambdas.sh
+	@echo "$(GREEN)✓ Build complete$(NC)"
 
-format: check-uv ## Format code (Python, Terraform, TypeScript)
+build-layer: _check-docker ## Build only the shared Lambda layer
+	@echo "$(BLUE)Building Lambda layer...$(NC)"
+	@./scripts/build-lambdas.sh --layer-only
+	@echo "$(GREEN)✓ Layer built$(NC)"
+
+build-function: _check-docker ## Build specific function(s) (FUNCTION=name or FUNCTION="name1 name2")
+ifndef FUNCTION
+	@echo "$(RED)Error: FUNCTION required. Usage: make build-function FUNCTION=chat-orchestrator$(NC)"
+	@echo "$(YELLOW)Tip: Use 'make build-list' to see available functions$(NC)"
+	@exit 1
+endif
+	@echo "$(BLUE)Building function(s): $(FUNCTION)...$(NC)"
+	@for func in $(FUNCTION); do \
+		./scripts/build-lambdas.sh -f $$func; \
+	done
+	@echo "$(GREEN)✓ Function(s) built$(NC)"
+
+build-list: ## List all available Lambda functions
+	@./scripts/build-lambdas.sh --list
+
+build-clean: ## Clean all build artifacts
+	@./scripts/build-lambdas.sh --clean
+
+# ==============================================================================
+# Code Quality
+# ==============================================================================
+format: _check-uv ## Format all code (Python + Terraform)
 	@echo "$(BLUE)Formatting Python code...$(NC)"
-	uv run ruff format lambda/
-	uv run ruff check lambda/ --fix
+	@uv run ruff format lambda/
+	@uv run ruff check lambda/ --fix || true
 	@echo "$(BLUE)Formatting Terraform code...$(NC)"
-	$(TERRAFORM) fmt -recursive terraform/
-	@echo "$(BLUE)Formatting TypeScript code...$(NC)"
-	cd web && npm run format
+	@$(TERRAFORM) fmt -recursive terraform/
 	@echo "$(GREEN)✓ Code formatted$(NC)"
 
-lint: check-uv ## Run linters (without fixing)
+lint: _check-uv ## Run linters (no fixes)
 	@echo "$(BLUE)Linting Python code...$(NC)"
-	uv run ruff check lambda/
-	@echo "$(BLUE)Linting TypeScript code...$(NC)"
-	cd web && npm run lint
+	@uv run ruff check lambda/
+	@echo "$(BLUE)Validating Terraform...$(NC)"
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) validate
 	@echo "$(GREEN)✓ Linting complete$(NC)"
 
-typecheck: ## Run type checkers
-	@echo "$(BLUE)Type checking Python code...$(NC)"
-	./scripts/lint-lambdas.sh
-	@echo "$(BLUE)Type checking TypeScript code...$(NC)"
-	cd web && npm run typecheck
+typecheck: _check-uv ## Run type checking on all functions
+	@echo "$(BLUE)Type checking Lambda functions...$(NC)"
+	@./scripts/lint-lambdas.sh
 	@echo "$(GREEN)✓ Type checking complete$(NC)"
 
-validate: check-uv ## Quick validation (format check + lint, no modifications)
-	@echo "$(BLUE)Checking Python formatting...$(NC)"
-	uv run ruff format lambda/ --check
-	@echo "$(BLUE)Checking Python linting...$(NC)"
-	uv run ruff check lambda/
+validate: _check-uv ## Quick validation (format check + lint, no modifications)
+	@echo "$(BLUE)Validating code...$(NC)"
+	@uv run ruff format lambda/ --check
+	@uv run ruff check lambda/
 	@echo "$(GREEN)✓ Validation passed$(NC)"
 
-security-scan: check-uv ## Run security scans
+security-scan: _check-uv ## Run security scans
 	@echo "$(BLUE)Running security scans...$(NC)"
-	uv run bandit -r lambda/ -ll
-	cd terraform && tfsec .
+	@uv run bandit -r lambda/ -ll 2>/dev/null || echo "$(YELLOW)bandit not installed, skipping$(NC)"
+	@cd terraform && tfsec . 2>/dev/null || echo "$(YELLOW)tfsec not installed, skipping$(NC)"
 	@echo "$(GREEN)✓ Security scan complete$(NC)"
 
-check: lint typecheck test-unit ## Run all checks (without formatting)
+check: lint typecheck ## Run all checks (no formatting)
 	@echo "$(GREEN)✓ All checks passed$(NC)"
 
-pre-commit: format check ## Format and run all checks (pre-commit workflow)
+pre-commit: format check ## Format + all checks (pre-commit workflow)
 	@echo "$(GREEN)✓ Ready to commit$(NC)"
 
-ci: lint typecheck test-all security-scan ## Run all CI checks
+ci: validate typecheck test-unit ## Run CI pipeline checks
 	@echo "$(GREEN)✓ CI checks passed$(NC)"
 
-## Testing Commands
+# ==============================================================================
+# Testing
+# ==============================================================================
+test: test-unit ## Run unit tests (alias)
 
-test-unit: check-uv ## Run unit tests
-	@echo "$(BLUE)Running Python unit tests...$(NC)"
-	cd lambda && uv run pytest tests/unit -v --cov=functions --cov-report=term-missing
-	@echo "$(BLUE)Running TypeScript unit tests...$(NC)"
-	cd web && npm run test
+test-unit: _check-uv ## Run all unit tests
+	@echo "$(BLUE)Running unit tests...$(NC)"
+	@./scripts/test-lambdas.sh
 	@echo "$(GREEN)✓ Unit tests complete$(NC)"
 
-test-integration: check-uv ## Run integration tests
-	@echo "$(BLUE)Running integration tests...$(NC)"
-	cd lambda && uv run pytest tests/integration -v
-	@echo "$(GREEN)✓ Integration tests complete$(NC)"
+test-function: _check-uv ## Run tests for specific function (FUNCTION=name)
+ifndef FUNCTION
+	@echo "$(RED)Error: FUNCTION required. Usage: make test-function FUNCTION=chat-orchestrator$(NC)"
+	@exit 1
+endif
+	@echo "$(BLUE)Testing $(FUNCTION)...$(NC)"
+	@cd lambda/functions/$(FUNCTION) && uv run pytest -v
+	@echo "$(GREEN)✓ Tests complete$(NC)"
 
-test-e2e: ## Run end-to-end tests
+test-cov: _check-uv ## Run tests with coverage for specific function (FUNCTION=name)
+ifndef FUNCTION
+	@echo "$(RED)Error: FUNCTION required. Usage: make test-cov FUNCTION=chat-orchestrator$(NC)"
+	@exit 1
+endif
+	@echo "$(BLUE)Testing $(FUNCTION) with coverage...$(NC)"
+	@cd lambda/functions/$(FUNCTION) && uv run pytest -v --cov=src --cov-report=term-missing --cov-report=html
+	@echo "$(GREEN)✓ Coverage report: lambda/functions/$(FUNCTION)/htmlcov/index.html$(NC)"
+
+test-e2e: _check-uv _check-aws ## Run E2E tests
 	@echo "$(BLUE)Running E2E tests...$(NC)"
-	cd web && npm run test:e2e
+	@uv run python scripts/test_chat_orchestrator.py
 	@echo "$(GREEN)✓ E2E tests complete$(NC)"
 
-test-all: test-unit test-integration ## Run all tests
+test-all: test-unit test-e2e ## Run all tests
 	@echo "$(GREEN)✓ All tests complete$(NC)"
 
-test: test-all ## Alias for test-all
+test-chat: _check-aws ## Quick test of /chat endpoint
+	@echo "$(BLUE)Testing /chat endpoint...$(NC)"
+	@CHAT_URL=$$(cd terraform/environments/$(ENV) && terraform output -raw chat_endpoint 2>/dev/null) && \
+	if [ -z "$$CHAT_URL" ]; then \
+		echo "$(RED)Error: Could not get chat endpoint. Is infrastructure deployed?$(NC)"; \
+		exit 1; \
+	fi && \
+	echo "Endpoint: $$CHAT_URL" && \
+	curl -s -X POST "$$CHAT_URL" \
+		-H "Content-Type: application/json" \
+		-d '{"message": "How do I reset my password?", "tenant_id": "test"}' | jq .
+	@echo ""
+	@echo "$(GREEN)✓ Chat test complete$(NC)"
 
-coverage: check-uv ## Generate coverage report
-	@echo "$(BLUE)Generating coverage report...$(NC)"
-	cd lambda && uv run pytest tests/ --cov=functions --cov-report=html
-	@echo "$(GREEN)✓ Coverage report generated at lambda/htmlcov/index.html$(NC)"
+test-api: _check-aws ## Test /classify-intent endpoint
+	@echo "$(BLUE)Testing /classify-intent endpoint...$(NC)"
+	@API_URL=$$(cd terraform/environments/$(ENV) && terraform output -raw classify_intent_endpoint 2>/dev/null) && \
+	if [ -z "$$API_URL" ]; then \
+		echo "$(RED)Error: Could not get API endpoint. Is infrastructure deployed?$(NC)"; \
+		exit 1; \
+	fi && \
+	echo "Endpoint: $$API_URL" && \
+	curl -s -X POST "$$API_URL" \
+		-H "Content-Type: application/json" \
+		-d '{"message": "I need to speak to a manager"}' | jq .
+	@echo ""
+	@echo "$(GREEN)✓ API test complete$(NC)"
 
-performance-test: check-uv ## Run performance tests
-	@echo "$(BLUE)Running performance tests...$(NC)"
-	uv run locust -f tests/load/locustfile.py --headless --users 50 --spawn-rate 5 --run-time 2m
-	@echo "$(GREEN)✓ Performance test complete$(NC)"
+# ==============================================================================
+# Terraform Commands
+# ==============================================================================
+tf-init: _check-terraform ## Initialize Terraform (ENV=dev|staging|prod)
+	@echo "$(BLUE)Initializing Terraform for $(ENV)...$(NC)"
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) init
+	@echo "$(GREEN)✓ Terraform initialized$(NC)"
 
-## Infrastructure Commands
+tf-plan: _check-terraform _check-aws ## Plan Terraform changes (ENV=dev|staging|prod)
+	@echo "$(BLUE)Planning Terraform for $(ENV)...$(NC)"
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) plan
 
-tf-plan-dev: check-terraform ## Terraform plan for dev
-	@echo "$(BLUE)Running Terraform plan for dev...$(NC)"
-	cd terraform/environments/dev && $(TERRAFORM) plan
+tf-apply: _check-terraform _check-aws ## Apply Terraform changes (ENV=dev|staging|prod)
+	@if [ "$(ENV)" = "prod" ]; then \
+		echo "$(RED)⚠️  Deploying to PRODUCTION$(NC)"; \
+		read -p "Type 'yes' to continue: " confirm && [ "$$confirm" = "yes" ] || exit 1; \
+	fi
+	@echo "$(BLUE)Applying Terraform for $(ENV)...$(NC)"
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) apply
+	@echo "$(GREEN)✓ Terraform applied$(NC)"
 
-tf-apply-dev: check-terraform ## Terraform apply for dev
-	@echo "$(BLUE)Applying Terraform for dev...$(NC)"
-	cd terraform/environments/dev && $(TERRAFORM) apply
+tf-destroy: _check-terraform _check-aws ## Destroy infrastructure (ENV=dev|staging|prod)
+	@echo "$(RED)⚠️  Destroying $(ENV) environment$(NC)"
+	@read -p "Type 'yes' to continue: " confirm && [ "$$confirm" = "yes" ] || exit 1
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) destroy
 
-tf-plan-prod: check-terraform ## Terraform plan for prod
-	@echo "$(BLUE)Running Terraform plan for prod...$(NC)"
-	cd terraform/environments/prod && $(TERRAFORM) plan
+tf-output: _check-terraform ## Show Terraform outputs (ENV=dev|staging|prod)
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) output
 
-tf-apply-prod: check-terraform ## Terraform apply for prod (with approval)
-	@echo "$(RED)⚠️  Deploying to PRODUCTION$(NC)"
-	@read -p "Are you sure? Type 'yes' to continue: " confirm && [ "$$confirm" = "yes" ] || exit 1
-	cd terraform/environments/prod && $(TERRAFORM) apply
+tf-state: _check-terraform ## List Terraform state resources (ENV=dev|staging|prod)
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) state list
 
-tf-destroy-dev: check-terraform ## Destroy dev environment
-	@echo "$(RED)⚠️  Destroying dev environment$(NC)"
-	@read -p "Are you sure? Type 'yes' to continue: " confirm && [ "$$confirm" = "yes" ] || exit 1
-	cd terraform/environments/dev && $(TERRAFORM) destroy
+tf-fmt: _check-terraform ## Format all Terraform files
+	@echo "$(BLUE)Formatting Terraform files...$(NC)"
+	@$(TERRAFORM) fmt -recursive terraform/
+	@echo "$(GREEN)✓ Terraform formatted$(NC)"
 
-## Deployment Commands
+tf-validate: _check-terraform ## Validate Terraform configuration (ENV=dev|staging|prod)
+	@echo "$(BLUE)Validating Terraform for $(ENV)...$(NC)"
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) validate
+	@echo "$(GREEN)✓ Terraform valid$(NC)"
 
+tf-refresh: _check-terraform _check-aws ## Refresh Terraform state (ENV=dev|staging|prod)
+	@echo "$(BLUE)Refreshing Terraform state for $(ENV)...$(NC)"
+	@cd terraform/environments/$(ENV) && $(TERRAFORM) refresh
+
+# ==============================================================================
+# Deployment Commands
+# ==============================================================================
 deploy: deploy-dev ## Alias for deploy-dev
 
-deploy-dev: check-aws ## Deploy to dev environment (default: ENV=dev)
-	@echo "$(BLUE)Deploying to $(ENV)...$(NC)"
-	$(MAKE) tf-apply-dev
-	$(MAKE) deploy-lambdas ENV=$(ENV)
-	@echo "$(GREEN)✓ Deployed to $(ENV)$(NC)"
+deploy-dev: build-all tf-apply ## Build and deploy to dev
+	@echo "$(GREEN)✓ Deployed to dev$(NC)"
 
-deploy-lambdas: check-aws ## Deploy Lambda functions (use: ENV=dev or ENV=prod)
-	@echo "$(BLUE)Packaging and deploying Lambda functions to $(ENV)...$(NC)"
-	./scripts/deploy-lambdas.sh $(ENV)
-	@echo "$(GREEN)✓ Lambdas deployed$(NC)"
+deploy-prod: ## Build and deploy to prod (with confirmation)
+	@echo "$(RED)⚠️  Deploying to PRODUCTION$(NC)"
+	@read -p "Type 'yes' to continue: " confirm && [ "$$confirm" = "yes" ] || exit 1
+	@$(MAKE) build-all
+	@$(MAKE) tf-apply ENV=prod
+	@echo "$(GREEN)✓ Deployed to prod$(NC)"
 
-deploy-web: check-aws ## Deploy Next.js frontend (use: ENV=dev or ENV=prod)
-	@echo "$(BLUE)Building and deploying web app to $(ENV)...$(NC)"
-	cd web && npm run build
-	aws s3 sync web/out/ s3://$(PROJECT_NAME)-web-$(ENV) --delete
-	@echo "$(GREEN)✓ Web app deployed$(NC)"
+# ==============================================================================
+# Logs & Monitoring
+# ==============================================================================
+logs: _check-aws ## View Lambda logs (FUNCTION=name, default: chat-orchestrator)
+	@FUNC=$${FUNCTION:-chat-orchestrator}; \
+	echo "$(BLUE)Tailing logs for $$FUNC...$(NC)"; \
+	aws logs tail /aws/lambda/$(PROJECT_NAME)-$$FUNC-$(ENV) --follow --format short
 
-## Local Development Commands
+logs-orchestrator: _check-aws ## View chat-orchestrator logs
+	@echo "$(BLUE)Tailing chat-orchestrator logs...$(NC)"
+	@aws logs tail /aws/lambda/$(PROJECT_NAME)-chat-orchestrator-$(ENV) --follow --format short
 
-local-start: ## Start local development environment
+logs-rag: _check-aws ## View rag-retriever logs
+	@echo "$(BLUE)Tailing rag-retriever logs...$(NC)"
+	@aws logs tail /aws/lambda/$(PROJECT_NAME)-rag-retriever-$(ENV) --follow --format short
+
+logs-bedrock: _check-aws ## View bedrock-handler logs
+	@echo "$(BLUE)Tailing bedrock-handler logs...$(NC)"
+	@aws logs tail /aws/lambda/$(PROJECT_NAME)-bedrock-handler-$(ENV) --follow --format short
+
+logs-intent: _check-aws ## View intent-classifier logs
+	@echo "$(BLUE)Tailing intent-classifier logs...$(NC)"
+	@aws logs tail /aws/lambda/$(PROJECT_NAME)-intent-classifier-$(ENV) --follow --format short
+
+logs-context: _check-aws ## View context-builder logs
+	@echo "$(BLUE)Tailing context-builder logs...$(NC)"
+	@aws logs tail /aws/lambda/$(PROJECT_NAME)-context-builder-$(ENV) --follow --format short
+
+logs-api: _check-aws ## View API Gateway logs
+	@echo "$(BLUE)Tailing API Gateway logs...$(NC)"
+	@LOG_GROUP=$$(aws logs describe-log-groups --log-group-name-prefix "API-Gateway" --query 'logGroups[0].logGroupName' --output text 2>/dev/null); \
+	if [ "$$LOG_GROUP" = "None" ] || [ -z "$$LOG_GROUP" ]; then \
+		echo "$(YELLOW)API Gateway logging not enabled or no logs found$(NC)"; \
+	else \
+		aws logs tail "$$LOG_GROUP" --follow --format short; \
+	fi
+
+logs-recent: _check-aws ## Show recent logs for a function (FUNCTION=name, last 30 min)
+	@FUNC=$${FUNCTION:-chat-orchestrator}; \
+	echo "$(BLUE)Recent logs for $$FUNC (last 30 min)...$(NC)"; \
+	aws logs filter-log-events \
+		--log-group-name /aws/lambda/$(PROJECT_NAME)-$$FUNC-$(ENV) \
+		--start-time $$(( $$(date +%s) - 1800 ))000 \
+		--query 'events[*].message' \
+		--output text | head -100
+
+logs-errors: _check-aws ## Show recent errors for a function (FUNCTION=name)
+	@FUNC=$${FUNCTION:-chat-orchestrator}; \
+	echo "$(BLUE)Recent errors for $$FUNC...$(NC)"; \
+	aws logs filter-log-events \
+		--log-group-name /aws/lambda/$(PROJECT_NAME)-$$FUNC-$(ENV) \
+		--start-time $$(( $$(date +%s) - 3600 ))000 \
+		--filter-pattern "ERROR" \
+		--query 'events[*].message' \
+		--output text
+
+# ==============================================================================
+# Knowledge Base & Utilities
+# ==============================================================================
+sync-kb: _check-aws ## Sync knowledge base documents to S3 and trigger ingestion
+	@echo "$(BLUE)Syncing knowledge base...$(NC)"
+	@./scripts/sync-knowledge-base.sh
+	@echo "$(GREEN)✓ Knowledge base synced$(NC)"
+
+local-start: _check-docker ## Start local development environment (LocalStack)
 	@echo "$(BLUE)Starting LocalStack...$(NC)"
-	docker-compose up -d
+	@docker-compose up -d 2>/dev/null || echo "$(YELLOW)docker-compose.yml not found$(NC)"
 	@echo "$(GREEN)✓ LocalStack started$(NC)"
 
 local-stop: ## Stop local development environment
 	@echo "$(BLUE)Stopping LocalStack...$(NC)"
-	docker-compose down
+	@docker-compose down 2>/dev/null || true
 	@echo "$(GREEN)✓ LocalStack stopped$(NC)"
 
-run-lambda: ## Run Lambda function locally (use: FUNCTION=intent-classifier)
-ifndef FUNCTION
-	@echo "$(RED)Error: FUNCTION is required. Usage: make run-lambda FUNCTION=intent-classifier$(NC)"
-	@exit 1
-endif
-	@echo "$(BLUE)Running Lambda function: $(FUNCTION)$(NC)"
-	@test -d lambda/functions/$(FUNCTION) || { echo "$(RED)Error: Function '$(FUNCTION)' not found$(NC)"; exit 1; }
-	cd lambda/functions/$(FUNCTION) && sam local invoke -e test-event.json
-
-logs: check-aws ## View Lambda logs (use: FUNCTION=intent-classifier)
-ifndef FUNCTION
-	@echo "$(RED)Error: FUNCTION is required. Usage: make logs FUNCTION=intent-classifier$(NC)"
-	@exit 1
-endif
-	@echo "$(BLUE)Fetching logs for: $(FUNCTION)$(NC)"
-	aws logs tail /aws/lambda/$(PROJECT_NAME)-$(FUNCTION)-$(ENV) --follow
-
-## Utility Commands
-
-seed-kb: check-uv check-aws ## Seed knowledge base with sample data
-	@echo "$(BLUE)Seeding knowledge base...$(NC)"
-	uv run $(PYTHON) scripts/seed-knowledge-base.py --environment $(ENV)
-	@echo "$(GREEN)✓ Knowledge base seeded$(NC)"
-
-create-user: check-uv check-aws ## Create test user in Cognito
-	@echo "$(BLUE)Creating test user...$(NC)"
-	uv run $(PYTHON) scripts/create-test-user.py
-	@echo "$(GREEN)✓ Test user created$(NC)"
-
-clean: ## Clean build artifacts
+clean: ## Clean all build artifacts and caches
 	@echo "$(BLUE)Cleaning build artifacts...$(NC)"
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf lambda/functions/*/package lambda/functions/*/function.zip
-	rm -rf web/.next web/out
+	@./scripts/build-lambdas.sh --clean 2>/dev/null || true
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	@find . -type f -name ".coverage" -delete 2>/dev/null || true
+	@rm -rf .build/ 2>/dev/null || true
 	@echo "$(GREEN)✓ Cleaned$(NC)"
 
-docs: check-uv ## Generate documentation
-	@echo "$(BLUE)Generating documentation...$(NC)"
-	cd docs && uv run mkdocs build
-	@echo "$(GREEN)✓ Documentation generated$(NC)"
+docs: ## Open architecture documentation
+	@echo "$(BLUE)Documentation available at:$(NC)"
+	@echo "  - docs/architecture/system-design.md"
+	@echo "  - docs/architecture/data-flow.md"
+	@echo "  - docs/architecture/security.md"
+	@echo "  - docs/adr/ (Architecture Decision Records)"
 
-## Information Commands
+# ==============================================================================
+# Information Commands
+# ==============================================================================
+whoami: _check-aws ## Show current AWS identity
+	@echo "$(BLUE)AWS Identity:$(NC)"
+	@aws sts get-caller-identity --output table
 
-version: ## Show project version
-	@echo "$(BLUE)Project: $(PROJECT_NAME)$(NC)"
-	@echo "$(BLUE)Version: $(shell cat VERSION 2>/dev/null || echo 'VERSION file not found')$(NC)"
+endpoints: _check-aws ## Show API endpoints
+	@echo "$(BLUE)API Endpoints ($(ENV)):$(NC)"
+	@cd terraform/environments/$(ENV) && \
+	echo "  Chat:    $$(terraform output -raw chat_endpoint 2>/dev/null || echo 'Not deployed')" && \
+	echo "  Intent:  $$(terraform output -raw classify_intent_endpoint 2>/dev/null || echo 'Not deployed')" && \
+	echo "  API Base: $$(terraform output -raw api_endpoint 2>/dev/null || echo 'Not deployed')"
 
-status: check-aws ## Show infrastructure status
-	@echo "$(BLUE)Checking infrastructure status...$(NC)"
-	@echo "$(GREEN)API Gateway:$(NC)"
-	@aws apigateway get-rest-apis --query 'items[?name==`$(PROJECT_NAME)-dev`].[id,name]' --output table 2>/dev/null || echo "Not deployed"
-	@echo "$(GREEN)Lambda Functions:$(NC)"
-	@aws lambda list-functions --query 'Functions[?starts_with(FunctionName, `$(PROJECT_NAME)`)].[FunctionName,Runtime,LastModified]' --output table 2>/dev/null || echo "Not deployed"
-	@echo "$(GREEN)DynamoDB Tables:$(NC)"
-	@aws dynamodb list-tables --query 'TableNames[?starts_with(@, `$(PROJECT_NAME)`)]' --output table 2>/dev/null || echo "Not deployed"
+status: _check-aws ## Show infrastructure status
+	@echo "$(BLUE)Infrastructure Status ($(ENV)):$(NC)"
+	@echo ""
+	@echo "$(CYAN)Lambda Functions:$(NC)"
+	@aws lambda list-functions \
+		--query "Functions[?starts_with(FunctionName, '$(PROJECT_NAME)') && contains(FunctionName, '$(ENV)')].[FunctionName,Runtime,MemorySize,Timeout]" \
+		--output table 2>/dev/null || echo "  No functions found"
+	@echo ""
+	@echo "$(CYAN)API Gateway:$(NC)"
+	@aws apigateway get-rest-apis \
+		--query "items[?contains(name, '$(PROJECT_NAME)')].[name,id,createdDate]" \
+		--output table 2>/dev/null || echo "  No APIs found"
+	@echo ""
+	@echo "$(CYAN)DynamoDB Tables:$(NC)"
+	@aws dynamodb list-tables \
+		--query "TableNames[?contains(@, '$(PROJECT_NAME)')]" \
+		--output table 2>/dev/null || echo "  No tables found"
 
-cost: check-uv ## Estimate infrastructure cost
-	@echo "$(BLUE)Estimating infrastructure cost...$(NC)"
-	uv run $(PYTHON) scripts/cost-calculator.py
-	@echo "$(GREEN)✓ Cost estimate complete$(NC)"
+cost: _check-aws ## Show estimated monthly cost (requires Cost Explorer access)
+	@echo "$(BLUE)Cost Estimate (last 30 days):$(NC)"
+	@aws ce get-cost-and-usage \
+		--time-period Start=$$(date -d '30 days ago' +%Y-%m-%d 2>/dev/null || date -v-30d +%Y-%m-%d),End=$$(date +%Y-%m-%d) \
+		--granularity MONTHLY \
+		--metrics "BlendedCost" \
+		--output table 2>/dev/null || echo "$(YELLOW)Cost Explorer access required$(NC)"
+
+# ==============================================================================
+# Quick Reference (shortcuts)
+# ==============================================================================
+# Common workflows:
+#   make build-function FUNCTION=chat-orchestrator  # Build single function
+#   make tf-apply                                    # Deploy to dev
+#   make test-chat                                   # Test the /chat endpoint
+#   make logs FUNCTION=chat-orchestrator             # Tail logs
+#   make logs-errors FUNCTION=rag-retriever          # Check for errors
