@@ -1,5 +1,7 @@
 """Response Validator request and response models."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -158,6 +160,17 @@ class PIICheckResult(BaseModel):
     )
     redacted_count: int = Field(default=0, ge=0, description="Number of redacted entities")
 
+    @property
+    def has_detections(self) -> bool:
+        """Check if any PII was detected (regardless of action taken)."""
+        return len(self.detections) > 0
+
+    @property
+    def critical_pii_found(self) -> bool:
+        """Check if high-risk PII types were detected."""
+        critical_types = {PIIType.SSN, PIIType.CREDIT_DEBIT_NUMBER, PIIType.BANK_ACCOUNT_NUMBER}
+        return any(d.pii_type in critical_types for d in self.detections)
+
 
 class ProfanityCheckResult(BaseModel):
     """Result of profanity check."""
@@ -220,7 +233,7 @@ class SentimentResult(BaseModel):
         cls,
         sentiment: str,
         scores: dict[str, float],
-    ) -> "SentimentResult":
+    ) -> SentimentResult:
         """Create from Comprehend API response."""
         sentiment_enum = Sentiment(sentiment)
         sentiment_scores = SentimentScores(
@@ -254,6 +267,32 @@ class EscalationFactors(BaseModel):
         default=0.0, ge=0.0, le=1.0, description="Low AI confidence score"
     )
 
+    @property
+    def weighted_score(self) -> float:
+        """Calculate weighted escalation score using ADR-012 weights."""
+        return (
+            0.35 * self.explicit_intent
+            + 0.25 * self.negative_sentiment
+            + 0.20 * self.urgency
+            + 0.15 * self.repeated_question
+            + 0.05 * self.low_confidence
+        )
+
+    @property
+    def dominant_factor(self) -> str | None:
+        """Get the factor contributing most to the score."""
+        contributions = {
+            "explicit_intent": 0.35 * self.explicit_intent,
+            "negative_sentiment": 0.25 * self.negative_sentiment,
+            "urgency": 0.20 * self.urgency,
+            "repeated_question": 0.15 * self.repeated_question,
+            "low_confidence": 0.05 * self.low_confidence,
+        }
+        max_contribution = max(contributions.values())
+        if max_contribution == 0:
+            return None
+        return max(contributions, key=lambda k: contributions[k])
+
 
 class EscalationResult(BaseModel):
     """Result of escalation scoring."""
@@ -269,7 +308,7 @@ class EscalationResult(BaseModel):
         cls,
         factors: EscalationFactors,
         threshold: float = 0.70,
-    ) -> "EscalationResult":
+    ) -> EscalationResult:
         """Calculate escalation score from weighted factors."""
         # Weights from ADR-012
         score = (
@@ -309,6 +348,26 @@ class ValidationResults(BaseModel):
     length: LengthCheckResult | None = Field(default=None, description="Length validation")
     business_rules: BusinessRulesResult | None = Field(default=None, description="Business rules")
 
+    @property
+    def all_passed(self) -> bool:
+        """Check if all enabled checks passed."""
+        checks = [self.profanity, self.pii, self.length, self.business_rules]
+        return all(check is None or check.passed for check in checks)
+
+    @property
+    def failed_checks(self) -> list[str]:
+        """Get list of check names that failed."""
+        failed = []
+        if self.profanity and not self.profanity.passed:
+            failed.append("profanity")
+        if self.pii and not self.pii.passed:
+            failed.append("pii")
+        if self.length and not self.length.passed:
+            failed.append("length")
+        if self.business_rules and not self.business_rules.passed:
+            failed.append("business_rules")
+        return failed
+
 
 class ValidationMetadata(BaseModel):
     """Metadata about the validation process."""
@@ -340,6 +399,21 @@ class ValidationResponse(BaseModel):
     escalation: EscalationResult | None = Field(default=None, description="Escalation scoring")
     metadata: ValidationMetadata = Field(..., description="Validation metadata")
 
+    @property
+    def was_modified(self) -> bool:
+        """Check if response was modified from original."""
+        return self.validated_response != self.original_response
+
+    @property
+    def needs_escalation(self) -> bool:
+        """Check if conversation should be escalated to human."""
+        return self.escalation is not None and self.escalation.needs_escalation
+
+    @property
+    def has_warnings(self) -> bool:
+        """Check if any warnings were generated (non-blocking issues)."""
+        return self.action == ValidationAction.WARN
+
     @classmethod
     def create(
         cls,
@@ -355,7 +429,7 @@ class ValidationResponse(BaseModel):
         fallback_used: bool = False,
         fallback_reason: str | None = None,
         comprehend_calls: int = 0,
-    ) -> "ValidationResponse":
+    ) -> ValidationResponse:
         """Factory method to create a ValidationResponse."""
         return cls(
             is_valid=is_valid,
