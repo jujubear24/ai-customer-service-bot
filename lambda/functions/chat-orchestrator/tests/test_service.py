@@ -32,11 +32,11 @@ class TestRAGRetrieverClient:
     def test_retrieve_success(self, rag_client, mock_lambda_client):
         # Mock Response
         mock_payload = {
-            "results": [
+            "documents": [
                 {
-                    "name": "Doc 1",
+                    "source_name": "Doc 1",
                     "content": "Content 1",
-                    "source": "http://source1",
+                    "source_uri": "http://source1",
                     "score": 0.9,
                     "metadata": {"type": "faq"},
                 }
@@ -50,7 +50,7 @@ class TestRAGRetrieverClient:
 
         assert len(docs) == 1
         assert docs[0].content == "Content 1"
-        assert docs[0].name == "Doc 1"
+        assert docs[0].source_name == "Doc 1"
 
         # Verify call arguments
         call_args = mock_lambda_client.invoke.call_args[1]
@@ -107,15 +107,15 @@ class TestChatOrchestrator:
 
         # Mock RAG return (mocking the method on the instance)
         rag_doc = SourceDocument(
-            name="Doc1", content="Context info", source="src", score=0.8, metadata={}
+            source_name="Doc1", content="Context info", source_uri="src", score=0.8, metadata={}
         )
         rag_client.retrieve = Mock(return_value=[rag_doc])
 
         # Mock Bedrock return
         bedrock_client.generate_response = Mock(
             return_value={
-                "response": "Here is help based on Context info",
-                "model": "claude",
+                "response_text": "Here is help based on Context info",
+                "model_id": "claude",
                 "conversation_id": "conv-new",
             }
         )

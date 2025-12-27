@@ -9,8 +9,9 @@ locals {
 
   # Predict function names to avoid circular dependencies in module.lambda
   # Pattern: {project}-{function}-{environment} (matches existing deployed resources)
-  rag_function_name     = "${var.project_name}-rag-retriever-${var.environment}"
-  bedrock_function_name = "${var.project_name}-bedrock-handler-${var.environment}"
+  rag_function_name                = "${var.project_name}-rag-retriever-${var.environment}"
+  bedrock_function_name            = "${var.project_name}-bedrock-handler-${var.environment}"
+  response_validator_function_name = "${var.project_name}-response-validator-${var.environment}"
 }
 
 # ==============================================================================
@@ -160,10 +161,11 @@ module "lambda" {
       timeout     = 29
       memory_size = 512
       environment_variables = {
-        POWERTOOLS_SERVICE_NAME      = "chat-orchestrator"
-        POWERTOOLS_METRICS_NAMESPACE = "ChatBot"
-        RAG_FUNCTION_NAME            = local.rag_function_name
-        BEDROCK_FUNCTION_NAME        = local.bedrock_function_name
+        POWERTOOLS_SERVICE_NAME          = "chat-orchestrator"
+        POWERTOOLS_METRICS_NAMESPACE     = "ChatBot"
+        RAG_FUNCTION_NAME                = local.rag_function_name
+        BEDROCK_FUNCTION_NAME            = local.bedrock_function_name
+        RESPONSE_VALIDATOR_FUNCTION_NAME = local.response_validator_function_name
       }
       enable_xray                  = true
       additional_layers            = [module.lambda_layer.layer_arn]
@@ -245,7 +247,8 @@ resource "aws_iam_policy" "orchestrator_invoke_policy" {
         Action = "lambda:InvokeFunction"
         Resource = [
           module.lambda.function_arns["rag-retriever"],
-          module.lambda.function_arns["bedrock-handler"]
+          module.lambda.function_arns["bedrock-handler"],
+          module.lambda.function_arns["response-validator"]
         ]
       }
     ]

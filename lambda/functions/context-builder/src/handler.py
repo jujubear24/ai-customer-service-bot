@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-import boto3  # type: ignore[import-untyped]
+import boto3
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.typing import LambdaContext
