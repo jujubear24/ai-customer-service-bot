@@ -1,7 +1,8 @@
 """Validation service layer for response validation.
 
 This module provides the main service that orchestrates PII detection,
-business rules validation, and generates fallback responses when needed.
+business rules validation, sentiment analysis, escalation scoring,
+and generates fallback responses when needed.
 """
 
 from __future__ import annotations
@@ -13,11 +14,14 @@ from typing import TYPE_CHECKING
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 
+from escalation import EscalationScorer, EscalationScorerConfig
 from models import (
     BusinessRulesResult,
+    EscalationResult,
     LengthCheckResult,
     PIICheckResult,
     ProfanityCheckResult,
+    SentimentResult,
     ValidationAction,
     ValidationRequest,
     ValidationResponse,
@@ -31,9 +35,11 @@ from rules import (
     RulesEngine,
     TopicRestrictionRule,
 )
+from sentiment_analyzer import SentimentAnalyzer, SentimentAnalyzerConfig
 
 if TYPE_CHECKING:
     from rules import RuleResult
+    from sentiment_analyzer import ExplicitEscalationResult
 
 logger = Logger(child=True)
 tracer = Tracer()
@@ -94,6 +100,8 @@ class ValidationServiceConfig:
     enable_profanity_check: bool = True
     enable_business_rules: bool = True
     enable_length_check: bool = True
+    enable_sentiment_analysis: bool = True  # NEW
+    enable_escalation_scoring: bool = True  # NEW
 
     # PII settings
     pii_config: PIIDetectorConfig | None = None
@@ -103,6 +111,13 @@ class ValidationServiceConfig:
     min_response_length: int = 20
     max_response_length: int = 2000
     truncate_long_responses: bool = True
+
+    # Sentiment settings (NEW)
+    sentiment_config: SentimentAnalyzerConfig | None = None
+
+    # Escalation settings (NEW)
+    escalation_threshold: float = 0.70
+    escalation_config: EscalationScorerConfig | None = None
 
     # Behavior settings
     stop_on_critical_failure: bool = True
@@ -122,6 +137,8 @@ class ResponseValidatorService:
         config: ValidationServiceConfig | None = None,
         pii_detector: PIIDetector | None = None,
         rules_engine: RulesEngine | None = None,
+        sentiment_analyzer: SentimentAnalyzer | None = None,
+        escalation_scorer: EscalationScorer | None = None,
     ) -> None:
         """Initialize the validation service.
 
@@ -129,10 +146,14 @@ class ResponseValidatorService:
             config: Service configuration. Uses defaults if not provided.
             pii_detector: PII detector instance. Created if not provided.
             rules_engine: Rules engine instance. Created if not provided.
+            sentiment_analyzer: Sentiment analyzer instance. Created if not provided.
+            escalation_scorer: Escalation scorer instance. Created if not provided.
         """
         self.config = config or ValidationServiceConfig()
         self._pii_detector = pii_detector
         self._rules_engine = rules_engine
+        self._sentiment_analyzer = sentiment_analyzer
+        self._escalation_scorer = escalation_scorer
 
     @property
     def pii_detector(self) -> PIIDetector:
@@ -167,6 +188,27 @@ class ResponseValidatorService:
 
         return self._rules_engine
 
+    @property
+    def sentiment_analyzer(self) -> SentimentAnalyzer:
+        """Lazy-load sentiment analyzer."""
+        if self._sentiment_analyzer is None:
+            self._sentiment_analyzer = SentimentAnalyzer(config=self.config.sentiment_config)
+        return self._sentiment_analyzer
+
+    @property
+    def escalation_scorer(self) -> EscalationScorer:
+        """Lazy-load escalation scorer."""
+        if self._escalation_scorer is None:
+            # Use config threshold if no custom config provided
+            if self.config.escalation_config is None:
+                escalation_config = EscalationScorerConfig(
+                    threshold=self.config.escalation_threshold
+                )
+            else:
+                escalation_config = self.config.escalation_config
+            self._escalation_scorer = EscalationScorer(config=escalation_config)
+        return self._escalation_scorer
+
     @tracer.capture_method
     def validate(self, request: ValidationRequest) -> ValidationResponse:
         """Validate an AI-generated response.
@@ -199,6 +241,8 @@ class ResponseValidatorService:
         profanity_result: ProfanityCheckResult | None = None
         length_result: LengthCheckResult | None = None
         business_rules_result: BusinessRulesResult | None = None
+        sentiment_result: SentimentResult | None = None
+        escalation_result: EscalationResult | None = None
 
         # Track overall status
         is_valid = True
@@ -241,6 +285,8 @@ class ResponseValidatorService:
                         profanity_result=profanity_result,
                         length_result=length_result,
                         business_rules_result=business_rules_result,
+                        sentiment_result=sentiment_result,
+                        escalation_result=escalation_result,
                         start_time=start_time,
                         rules_evaluated=rules_evaluated,
                         fallback_used=fallback_used,
@@ -303,7 +349,28 @@ class ResponseValidatorService:
                 action = ValidationAction.MODIFY
 
         # =================================================================
-        # Step 3: Build and return response
+        # Step 3: Sentiment Analysis (NEW)
+        # =================================================================
+        explicit_escalation = None
+        if request.options.analyze_sentiment and self.config.enable_sentiment_analysis:
+            sentiment_result, explicit_escalation = self._analyze_sentiment(request.user_message)
+            comprehend_calls += 1
+
+        # =================================================================
+        # Step 4: Escalation Scoring (NEW)
+        # =================================================================
+        if request.options.calculate_escalation and self.config.enable_escalation_scoring:
+            escalation_result = self._calculate_escalation(
+                sentiment=sentiment_result,
+                explicit_escalation=explicit_escalation,
+                urgency=request.urgency,
+                current_intent=request.intent,
+                previous_intents=request.previous_intents,
+                intent_confidence=request.intent_confidence,
+            )
+
+        # =================================================================
+        # Step 5: Build and return response
         # =================================================================
         validation_response = self._build_response(
             original_response=original_response,
@@ -314,6 +381,8 @@ class ResponseValidatorService:
             profanity_result=profanity_result,
             length_result=length_result,
             business_rules_result=business_rules_result,
+            sentiment_result=sentiment_result,
+            escalation_result=escalation_result,
             start_time=start_time,
             rules_evaluated=rules_evaluated,
             fallback_used=fallback_used,
@@ -331,6 +400,7 @@ class ResponseValidatorService:
                 "action": validation_response.action.value,
                 "validation_time_ms": validation_response.metadata.validation_time_ms,
                 "fallback_used": fallback_used,
+                "needs_escalation": validation_response.needs_escalation,
                 "conversation_id": request.conversation_id,
             },
         )
@@ -341,6 +411,63 @@ class ResponseValidatorService:
     def _check_pii(self, text: str) -> PIICheckResult:
         """Run PII detection on text."""
         return self.pii_detector.detect(text)
+
+    @tracer.capture_method
+    def _analyze_sentiment(
+        self, text: str
+    ) -> tuple[SentimentResult | None, ExplicitEscalationResult | None]:
+        """Run sentiment analysis and explicit escalation detection.
+
+        Args:
+            text: User message text to analyze.
+
+        Returns:
+            Tuple of (SentimentResult, ExplicitEscalationResult).
+        """
+        from sentiment_analyzer import ExplicitEscalationResult
+
+        try:
+            sentiment, explicit_escalation = self.sentiment_analyzer.analyze_with_escalation(text)
+            return sentiment, explicit_escalation
+        except Exception as e:
+            logger.error(
+                "Sentiment analysis failed",
+                extra={"error": str(e)},
+            )
+            # Fail open - return None results
+            return None, ExplicitEscalationResult(detected=False)
+
+    @tracer.capture_method
+    def _calculate_escalation(
+        self,
+        sentiment: SentimentResult | None,
+        explicit_escalation: ExplicitEscalationResult | None,
+        urgency: str | None,
+        current_intent: str | None,
+        previous_intents: list[str],
+        intent_confidence: float | None,
+    ) -> EscalationResult:
+        """Calculate escalation score from multiple factors.
+
+        Args:
+            sentiment: Sentiment analysis result.
+            explicit_escalation: Explicit escalation detection result.
+            urgency: Urgency level from intent classifier.
+            current_intent: Current message intent.
+            previous_intents: List of previous intents.
+            intent_confidence: Intent classifier confidence.
+
+        Returns:
+            EscalationResult with score and factor breakdown.
+        """
+        return self.escalation_scorer.calculate_score(
+            sentiment=sentiment,
+            explicit_escalation=explicit_escalation,
+            urgency=urgency,
+            current_intent=current_intent,
+            previous_intents=previous_intents,
+            intent_confidence=intent_confidence,
+        )
 
     def _extract_rule_results(
         self,
@@ -369,7 +496,7 @@ class ResponseValidatorService:
 
         return profanity_result, length_result, business_rules_result
 
-    def _get_rule_by_id(self, rule_id: str) -> object | None:
+    def _get_rule_by_id(self, rule_id: str) -> BusinessRule | None:
         """Get a rule instance by ID."""
         for rule in self.rules_engine.rules:
             if rule.rule_id == rule_id:
@@ -413,6 +540,8 @@ class ResponseValidatorService:
         profanity_result: ProfanityCheckResult | None,
         length_result: LengthCheckResult | None,
         business_rules_result: BusinessRulesResult | None,
+        sentiment_result: SentimentResult | None,
+        escalation_result: EscalationResult | None,
         start_time: float,
         rules_evaluated: int,
         fallback_used: bool,
@@ -436,6 +565,8 @@ class ResponseValidatorService:
             action=action,
             validation_results=validation_results,
             validation_time_ms=validation_time_ms,
+            sentiment=sentiment_result,
+            escalation=escalation_result,
             rules_evaluated=rules_evaluated,
             fallback_used=fallback_used,
             fallback_reason=fallback_reason,
@@ -500,6 +631,36 @@ class ResponseValidatorService:
                 value=1,
             )
 
+        # Sentiment metrics (NEW)
+        if response.sentiment:
+            metrics.add_metric(
+                name="SentimentAnalysisRequests",
+                unit=MetricUnit.Count,
+                value=1,
+            )
+            metrics.add_metric(
+                name=f"Sentiment_{response.sentiment.sentiment.value}",
+                unit=MetricUnit.Count,
+                value=1,
+            )
+
+        # Escalation metrics (NEW)
+        if response.escalation:
+            if response.escalation.needs_escalation:
+                metrics.add_metric(
+                    name="EscalationTriggered",
+                    unit=MetricUnit.Count,
+                    value=1,
+                )
+                # Track by primary reason
+                if response.escalation.primary_reason:
+                    reason_key = response.escalation.primary_reason.replace(" ", "_")
+                    metrics.add_metric(
+                        name=f"EscalationReason_{reason_key}",
+                        unit=MetricUnit.Count,
+                        value=1,
+                    )
+
         # Add dimensions
         metrics.add_dimension(name="TenantId", value=request.tenant_id)
 
@@ -523,6 +684,7 @@ def create_strict_service() -> ResponseValidatorService:
         max_response_length=1500,
         truncate_long_responses=False,
         stop_on_critical_failure=True,
+        escalation_threshold=0.50,  # Lower threshold = more escalations
     )
 
     return ResponseValidatorService(
@@ -541,6 +703,7 @@ def create_permissive_service() -> ResponseValidatorService:
         truncate_long_responses=True,
         stop_on_critical_failure=False,
         use_fallback_on_block=False,
+        escalation_threshold=0.85,  # Higher threshold = fewer escalations
     )
 
     return ResponseValidatorService(
