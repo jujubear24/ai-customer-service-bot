@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from escalation import EscalationScorer, EscalationScorerConfig
 from models import (
     EscalationFactors,
     PIIAction,
@@ -27,6 +28,7 @@ from rules import (
     RulesEngine,
     TopicRestrictionRule,
 )
+from sentiment_analyzer import SentimentAnalyzer, SentimentAnalyzerConfig
 from service import ResponseValidatorService, ValidationServiceConfig
 
 # =============================================================================
@@ -371,6 +373,147 @@ def mock_lambda_context() -> MagicMock:
     context.aws_request_id = "test-request-id-12345"
     context.get_remaining_time_in_millis.return_value = 30000
     return context
+
+
+# =============================================================================
+# Comprehend Sentiment Mock Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def mock_comprehend_sentiment_positive() -> MagicMock:
+    """Create a mock Comprehend client that returns positive sentiment."""
+    mock = MagicMock()
+    mock.detect_sentiment.return_value = {
+        "Sentiment": "POSITIVE",
+        "SentimentScore": {
+            "Positive": 0.95,
+            "Negative": 0.01,
+            "Neutral": 0.03,
+            "Mixed": 0.01,
+        },
+    }
+    return mock
+
+
+@pytest.fixture
+def mock_comprehend_sentiment_negative() -> MagicMock:
+    """Create a mock Comprehend client that returns negative sentiment."""
+    mock = MagicMock()
+    mock.detect_sentiment.return_value = {
+        "Sentiment": "NEGATIVE",
+        "SentimentScore": {
+            "Positive": 0.02,
+            "Negative": 0.88,
+            "Neutral": 0.05,
+            "Mixed": 0.05,
+        },
+    }
+    return mock
+
+
+@pytest.fixture
+def mock_comprehend_sentiment_neutral() -> MagicMock:
+    """Create a mock Comprehend client that returns neutral sentiment."""
+    mock = MagicMock()
+    mock.detect_sentiment.return_value = {
+        "Sentiment": "NEUTRAL",
+        "SentimentScore": {
+            "Positive": 0.03,
+            "Negative": 0.02,
+            "Neutral": 0.92,
+            "Mixed": 0.03,
+        },
+    }
+    return mock
+
+
+@pytest.fixture
+def mock_comprehend_sentiment_mixed() -> MagicMock:
+    """Create a mock Comprehend client that returns mixed sentiment."""
+    mock = MagicMock()
+    mock.detect_sentiment.return_value = {
+        "Sentiment": "MIXED",
+        "SentimentScore": {
+            "Positive": 0.35,
+            "Negative": 0.30,
+            "Neutral": 0.10,
+            "Mixed": 0.25,
+        },
+    }
+    return mock
+
+
+# =============================================================================
+# Sentiment Analyzer Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def sentiment_analyzer(mock_comprehend_sentiment_neutral: MagicMock) -> SentimentAnalyzer:
+    """Create a sentiment analyzer with mocked Comprehend client."""
+    return SentimentAnalyzer(comprehend_client=mock_comprehend_sentiment_neutral)
+
+
+@pytest.fixture
+def sentiment_analyzer_no_comprehend() -> SentimentAnalyzer:
+    """Create a sentiment analyzer without Comprehend (for escalation pattern testing)."""
+    config = SentimentAnalyzerConfig(fail_open=True)
+    return SentimentAnalyzer(config=config)
+
+
+# =============================================================================
+# Escalation Scorer Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def escalation_scorer() -> EscalationScorer:
+    """Create an escalation scorer with default config."""
+    return EscalationScorer()
+
+
+@pytest.fixture
+def escalation_scorer_low_threshold() -> EscalationScorer:
+    """Create an escalation scorer with low threshold for testing."""
+    config = EscalationScorerConfig(threshold=0.30)
+    return EscalationScorer(config=config)
+
+
+@pytest.fixture
+def escalation_scorer_high_threshold() -> EscalationScorer:
+    """Create an escalation scorer with high threshold for testing."""
+    config = EscalationScorerConfig(threshold=0.90)
+    return EscalationScorer(config=config)
+
+
+# =============================================================================
+# Full Validation Service Fixture (with sentiment & escalation)
+# =============================================================================
+
+
+@pytest.fixture
+def validation_service_full(
+    pii_detector: PIIDetector,
+    mock_comprehend_sentiment_neutral: MagicMock,
+) -> ResponseValidatorService:
+    """Create a validation service with all features enabled including sentiment."""
+    sentiment_analyzer = SentimentAnalyzer(comprehend_client=mock_comprehend_sentiment_neutral)
+
+    config = ValidationServiceConfig(
+        enable_pii_detection=True,
+        enable_profanity_check=True,
+        enable_business_rules=True,
+        enable_length_check=True,
+        enable_sentiment_analysis=True,
+        enable_escalation_scoring=True,
+    )
+
+    return ResponseValidatorService(
+        config=config,
+        pii_detector=pii_detector,
+        sentiment_analyzer=sentiment_analyzer,
+    )
 
 
 # =============================================================================
