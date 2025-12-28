@@ -42,13 +42,21 @@ metrics = Metrics()
 def _create_service() -> ResponseValidatorService:
     """Create validation service from environment configuration."""
     config = ValidationServiceConfig(
+        # Feature flags - existing
         enable_pii_detection=os.getenv("ENABLE_PII_DETECTION", "true").lower() == "true",
         enable_profanity_check=os.getenv("ENABLE_PROFANITY_CHECK", "true").lower() == "true",
         enable_business_rules=os.getenv("ENABLE_BUSINESS_RULES", "true").lower() == "true",
         enable_length_check=os.getenv("ENABLE_LENGTH_CHECK", "true").lower() == "true",
+        # Feature flags - NEW for Phase 3.2
+        enable_sentiment_analysis=os.getenv("ENABLE_SENTIMENT_ANALYSIS", "true").lower() == "true",
+        enable_escalation_scoring=os.getenv("ENABLE_ESCALATION_SCORING", "true").lower() == "true",
+        # Length settings
         min_response_length=int(os.getenv("MIN_RESPONSE_LENGTH", "20")),
         max_response_length=int(os.getenv("MAX_RESPONSE_LENGTH", "2000")),
         truncate_long_responses=os.getenv("TRUNCATE_LONG_RESPONSES", "true").lower() == "true",
+        # Escalation settings - NEW for Phase 3.2
+        escalation_threshold=float(os.getenv("ESCALATION_THRESHOLD", "0.70")),
+        # Behavior settings
         stop_on_critical_failure=os.getenv("STOP_ON_CRITICAL_FAILURE", "true").lower() == "true",
         use_fallback_on_block=os.getenv("USE_FALLBACK_ON_BLOCK", "true").lower() == "true",
         redact_pii_in_response=os.getenv("REDACT_PII_IN_RESPONSE", "true").lower() == "true",
@@ -230,6 +238,8 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
                 "conversation_id": conversation_id,
                 "tenant_id": request.tenant_id,
                 "response_length": len(request.response_text),
+                "sentiment_enabled": request.options.analyze_sentiment,
+                "escalation_enabled": request.options.calculate_escalation,
             },
         )
 
@@ -244,6 +254,8 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
                 "is_valid": response.is_valid,
                 "action": response.action.value,
                 "validation_time_ms": response.metadata.validation_time_ms,
+                "needs_escalation": response.needs_escalation,
+                "sentiment": response.sentiment.sentiment.value if response.sentiment else None,
             },
         )
 
