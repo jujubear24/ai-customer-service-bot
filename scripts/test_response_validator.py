@@ -72,7 +72,7 @@ TEST_CASES = [
     # Profanity - Should Block
     TestCase(
         name="profanity_blocked",
-        response_text="What the hell do you want? This is such bullshit service.",
+        response_text="What the fuck do you want? This is such shit service.",
         user_message="I need help",
         expected_valid=False,
         expected_action="BLOCK",
