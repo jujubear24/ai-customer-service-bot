@@ -22,7 +22,7 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 ### Phase 1: Core Infrastructure ✅
 
 | Component | Status | Description |
-|-----------|--------|-------------|
+| ----------- | -------- | ------------- |
 | Intent Classifier Lambda | ✅ Deployed | Rule-based classification with 7 intent types |
 | Context Builder Lambda | ✅ Deployed | Retrieves conversation history, manages token limits |
 | DynamoDB Table | ✅ Deployed | Single-table design with GSIs for flexible querying |
@@ -33,28 +33,28 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 ### Phase 2: AI Integration ✅
 
 | Component | Status | Description |
-|-----------|--------|-------------|
+| ----------- | -------- | ------------- |
 | Bedrock Handler Lambda | ✅ Deployed | Claude Haiku 4.5 integration for response generation |
 | RAG Retriever Lambda | ✅ Deployed | Knowledge Base retrieval with semantic search |
-| Chat Orchestrator Lambda | ✅ Deployed | Coordinates RAG → Bedrock flow |
+| Chat Orchestrator Lambda | ✅ Deployed | Coordinates RAG → Bedrock → Validation flow |
 | Knowledge Base | ✅ Deployed | Bedrock Knowledge Base with Aurora PostgreSQL (pgvector) |
 | S3 Document Store | ✅ Deployed | FAQ and documentation storage for RAG |
 | POST /chat Endpoint | ✅ Deployed | Unified chat API with RAG-enhanced responses |
 
-### Phase 3: Response Validation & Sentiment 📋
+### Phase 3: Response Validation & Sentiment 🚧
 
 | Component | Status | Description |
-|-----------|--------|-------------|
-| Response Validator Lambda | 📋 Planned | Output validation and safety checks |
-| Sentiment Analyzer | 📋 Planned | Amazon Comprehend integration |
-| Content Safety Checks | 📋 Planned | Business rules engine |
+| ----------- | -------- | ------------- |
+| Response Validator Lambda | ✅ Deployed | PII detection, profanity filter, business rules, length validation |
+| Chat Orchestrator Integration | ✅ Deployed | Validation step added to orchestration flow |
+| Sentiment Analyzer | 📋 Planned | Amazon Comprehend integration for sentiment scoring |
+| Escalation Router | 📋 Planned | Priority-based routing to human agents |
 
 ### Future Phases 📋
 
 | Feature | Description |
-|---------|-------------|
+| --------- | ------------- |
 | Step Functions Workflow | Orchestrate full Lambda chain with error handling |
-| Escalation Router | Priority-based routing to human agents |
 | ElastiCache Redis | Session caching and rate limiting |
 | Real-Time Analytics | OpenSearch dashboards for metrics |
 | Multi-Tenant Support | SaaS-ready with data isolation |
@@ -64,7 +64,7 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 
 ## 🏗️ Architecture
 
-### Current State (Phase 2)
+### Current State (Phase 3)
 
 ```bash
 ┌─────────────┐
@@ -82,7 +82,7 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
        ▼
 ┌──────────────────────────────────────────────────────┐
 │            Chat Orchestrator Lambda                  │
-│     • Coordinates RAG + Bedrock flow                 │
+│     • Coordinates RAG + Bedrock + Validation flow    │
 │     • Generates conversation IDs                     │
 │     • Aggregates latency metrics                     │
 └──────┬───────────────────┬───────────────────────────┘
@@ -105,6 +105,22 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 │  • pgvector      │
 │  • S3 docs       │
 └──────────────────┘
+                              │
+                              ▼
+                    ┌──────────────────────────────┐
+                    │    Response Validator        │
+                    │        Lambda                │
+                    │  • PII detection (Comprehend)│
+                    │  • Profanity filtering       │
+                    │  • Business rules engine     │
+                    │  • Length validation         │
+                    └──────────────┬───────────────┘
+                                   │
+                                   ▼
+                            ┌──────────────┐
+                            │   Customer   │
+                            │   Response   │
+                            └──────────────┘
 
 Additional Endpoints:
 ┌─────────────┐
@@ -162,20 +178,59 @@ See [`docs/architecture/`](docs/architecture/) for detailed design documents.
 
 ## 🧩 Components
 
-### Chat Orchestrator Lambda (NEW)
+### Response Validator Lambda (NEW)
 
-Orchestrates the complete chat flow, coordinating RAG retrieval and AI response generation.
+Validates all AI-generated responses before delivery to customers, ensuring safety and compliance.
+
+- **Trigger:** Invoked by Chat Orchestrator
+- **Features:**
+  - **PII Detection:** Blocks SSN, credit cards; allows order IDs (Comprehend + regex)
+  - **Profanity Filter:** Blocks inappropriate language
+  - **Length Validation:** Enforces min/max length, smart truncation
+  - **Business Rules:** Adds disclaimers for medical/legal/financial advice
+  - **Escalation Scoring:** Calculates when to escalate to human agents
+  - **Fail-Open Design:** Returns original response on validation errors
+- **Performance:** 512 MB memory, ~200-500ms execution time
+- **Test Coverage:** 80%+ (140+ unit tests)
+
+**Validation Actions:**
+
+| Action | Description |
+| -------- | ------------- |
+| `PASS` | Response is valid, no changes needed |
+| `MODIFY` | Response modified (truncated, disclaimer added) |
+| `BLOCK` | Response blocked, fallback message used |
+| `WARN` | Response passed with warnings logged |
+
+**Configuration:**
+
+| Variable | Default | Description |
+| ---------- | --------- | ------------- |
+| `ENABLE_PII_DETECTION` | `true` | Enable PII detection via Comprehend |
+| `ENABLE_PROFANITY_CHECK` | `true` | Enable profanity filtering |
+| `ENABLE_BUSINESS_RULES` | `true` | Enable topic restriction rules |
+| `MIN_RESPONSE_LENGTH` | `20` | Minimum response length (chars) |
+| `MAX_RESPONSE_LENGTH` | `2000` | Maximum response length (chars) |
+| `FAIL_OPEN_ON_ERROR` | `false` | Return original on validation errors |
+
+See [ADR-012](docs/adr/ADR-012-response-validation.md) for design decisions.
+
+### Chat Orchestrator Lambda
+
+Orchestrates the complete chat flow, coordinating RAG retrieval, AI response generation, and response validation.
 
 - **Endpoint:** `POST /chat`
 - **Features:**
   - Invokes RAG Retriever for context retrieval
   - Invokes Bedrock Handler for response generation
+  - Invokes Response Validator for safety checks
   - Auto-generates conversation IDs
-  - Aggregates latency metrics (RAG, Bedrock, total)
+  - Aggregates latency metrics (RAG, Bedrock, validation, total)
   - Resilient with retry logic (tenacity)
+  - Configurable validation (`validate_response` flag)
 - **Performance:** 512 MB memory, ~8-10s total latency (cold), ~3-5s (warm)
 
-### RAG Retriever Lambda (NEW)
+### RAG Retriever Lambda
 
 Retrieves relevant documents from the Knowledge Base for context-aware responses.
 
@@ -187,7 +242,7 @@ Retrieves relevant documents from the Knowledge Base for context-aware responses
   - Aurora PostgreSQL with pgvector for embeddings
 - **Performance:** 256 MB memory, ~1-2s retrieval time
 
-### Bedrock Handler Lambda (NEW)
+### Bedrock Handler Lambda
 
 Generates AI responses using Amazon Bedrock Claude models.
 
@@ -200,7 +255,7 @@ Generates AI responses using Amazon Bedrock Claude models.
   - Configurable temperature, max_tokens, top_p
 - **Performance:** 512 MB memory, ~2-4s generation time
 
-### Knowledge Base (NEW)
+### Knowledge Base
 
 Bedrock Knowledge Base with Aurora PostgreSQL for vector storage.
 
@@ -332,6 +387,15 @@ curl -X POST "$CHAT_URL" \
     "tenant_id": "test-tenant"
   }'
 
+# Test with validation disabled
+curl -X POST "$CHAT_URL" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "How do I reset my password?",
+    "tenant_id": "test-tenant",
+    "validate_response": false
+  }'
+
 # Test intent classification
 curl -X POST "$(cd terraform/environments/dev && terraform output -raw classify_intent_endpoint)" \
   -H "Content-Type: application/json" \
@@ -346,7 +410,7 @@ curl -X POST "$(cd terraform/environments/dev && terraform output -raw classify_
 ai-customer-service-bot/
 ├── .github/                    # GitHub Actions workflows
 ├── docs/
-│   ├── adr/                    # Architecture Decision Records (ADR-001 to ADR-011)
+│   ├── adr/                    # Architecture Decision Records (ADR-001 to ADR-012)
 │   ├── architecture/           # System design docs
 │   │   ├── data-flow.md
 │   │   └── system-design.md
@@ -364,7 +428,7 @@ ai-customer-service-bot/
 │   │   ├── intent-classifier/  # ✅ Intent classification Lambda
 │   │   ├── metrics-publisher/  # 📋 Custom metrics (planned)
 │   │   ├── rag-retriever/      # ✅ Knowledge Base retrieval
-│   │   └── response-validator/ # 📋 Output validation (planned)
+│   │   └── response-validator/ # ✅ Output validation and safety
 │   ├── layers/
 │   │   └── common/             # Shared Lambda layer
 │   └── step-functions/         # Step Functions definitions (planned)
@@ -374,6 +438,7 @@ ai-customer-service-bot/
 │   ├── setup.sh                # Initial project setup
 │   ├── sync-knowledge-base.sh  # Sync KB documents to S3
 │   ├── test_chat_orchestrator.py  # E2E test script
+│   ├── test_response_validator.py # E2E validation tests
 │   └── ...                     # Other utility scripts
 ├── terraform/
 │   ├── backend_bootstrap/      # S3/DynamoDB state backend setup
@@ -411,12 +476,18 @@ cd lambda/functions/context-builder && uv run pytest -v
 cd lambda/functions/bedrock-handler && uv run pytest -v
 cd lambda/functions/rag-retriever && uv run pytest -v
 cd lambda/functions/chat-orchestrator && uv run pytest -v
+cd lambda/functions/response-validator && uv run pytest -v
 
 # All tests with coverage
 make test-unit
 
 # E2E test for chat orchestrator
 python scripts/test_chat_orchestrator.py
+
+# E2E test for response validator
+python scripts/test_response_validator.py
+python scripts/test_response_validator.py --quick  # Quick tests only
+python scripts/test_response_validator.py -v       # Verbose output
 
 # Integration tests (when implemented)
 make test-integration
@@ -457,10 +528,10 @@ make local-stop
 - **Custom Metrics:** Classification counts, latency percentiles, error rates, token usage
 - **CloudWatch Alarms:** DynamoDB throttling, Lambda errors, Bedrock throttling
 
-### Key Metrics (Phase 2)
+### Key Metrics
 
 | Metric | Source | Description |
-|--------|--------|-------------|
+| -------- | -------- | ------------- |
 | BedrockInvocations | Bedrock Handler | Total AI invocations |
 | BedrockInputTokens | Bedrock Handler | Input token usage |
 | BedrockOutputTokens | Bedrock Handler | Output token usage |
@@ -468,6 +539,11 @@ make local-stop
 | DocumentsRetrieved | RAG Retriever | RAG documents found |
 | RetrievalLatency | RAG Retriever | KB query time |
 | AverageRelevanceScore | RAG Retriever | RAG result quality |
+| ValidationCount | Response Validator | Total validations |
+| ValidationBlocked | Response Validator | Blocked responses |
+| ValidationModified | Response Validator | Modified responses |
+| PIIDetected | Response Validator | PII detection events |
+| ValidationLatency | Response Validator | Processing time |
 
 ---
 
@@ -478,6 +554,7 @@ make local-stop
 - **API Gateway:** Request validation, throttling (100 burst, 50 req/sec)
 - **VPC:** Aurora PostgreSQL in private subnets
 - **Secrets:** Environment variables via Terraform (Secrets Manager planned)
+- **Response Validation:** PII detection, profanity filtering, content safety checks
 
 See [`docs/architecture/security.md`](docs/architecture/security.md) for detailed security documentation.
 
@@ -486,15 +563,16 @@ See [`docs/architecture/security.md`](docs/architecture/security.md) for detaile
 ## 💰 Current Cost (Dev Environment)
 
 | Service | Monthly Estimate |
-|---------|------------------|
+| -------- | ------------------ |
 | Lambda | $1-5 |
 | DynamoDB (on-demand) | $1-5 |
 | API Gateway | $1-3 |
 | CloudWatch | $1-3 |
 | Aurora Serverless v2 | $15-50 |
 | Bedrock (Claude Haiku) | $5-20 |
+| Comprehend (PII) | $1-5 |
 | S3 | <$1 |
-| **Total** | **~$25-85** |
+| **Total** | **~$26-90** |
 
 Costs scale with usage. Aurora Serverless v2 is the primary cost driver in dev.
 
@@ -509,12 +587,13 @@ Costs scale with usage. Aurora Serverless v2 is the primary cost driver in dev.
 ### Key ADRs
 
 | ADR | Title |
-|-----|-------|
+| ----- | ------- |
 | [ADR-007](docs/adr/ADR-007-api-gateway-integration-and-request-validation.md) | API Gateway Integration |
 | [ADR-008](docs/adr/ADR-008-dynamodb-schema-design.md) | DynamoDB Schema Design |
 | [ADR-009](docs/adr/ADR-009-bedrock-integration.md) | Bedrock Integration |
 | [ADR-010](docs/adr/ADR-010-knowledge-base-rag.md) | Knowledge Base RAG |
 | [ADR-011](docs/adr/ADR-011-orchestrator-pattern.md) | Orchestrator Pattern |
+| [ADR-012](docs/adr/ADR-012-response-validation.md) | Response Validation Strategy |
 
 ---
 

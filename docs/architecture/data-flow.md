@@ -1,13 +1,14 @@
 # Data Flow
 
-**Last Updated:** December 17, 2025
-**Status:** Phase 2 Complete
+**Last Updated:** December 2025
+**Status:** Phase 3.1 Complete
 
 ---
 
 ## Overview
 
-This document describes the data flows within the AI Customer Service Bot, focusing on how customer messages are processed, how RAG retrieval works, and how AI responses are generated.
+This document describes the data flows within the AI Customer Service Bot, focusing on how customer messages are processed, how RAG retrieval works, how AI responses are generated, and how responses
+are validated for safety and compliance.
 
 ---
 
@@ -25,6 +26,8 @@ sequenceDiagram
     participant KB as Knowledge Base
     participant BH as Bedrock Handler
     participant BR as Amazon Bedrock
+    participant RV as Response Validator
+    participant CP as Comprehend
     participant CW as CloudWatch
 
     C->>AG: POST /chat<br/>{"message": "...", "tenant_id": "..."}
@@ -59,7 +62,19 @@ sequenceDiagram
     BH-->>CO: {response_text, model_id, tokens}
     BH->>CW: Log Bedrock metrics
 
-    Note over CO: Assemble ChatResponse<br/>with sources & latency
+    Note over CO: Validate response<br/>before returning
+
+    CO->>RV: Invoke Lambda<br/>{"response_text": "...", "user_message": "..."}
+
+    RV->>CP: DetectPiiEntities
+    CP-->>RV: PII detections
+
+    Note over RV: Run business rules<br/>(profanity, length, disclaimers)
+
+    RV-->>CO: {validated_response, action, metadata}
+    RV->>CW: Log validation metrics
+
+    Note over CO: Assemble ChatResponse<br/>with sources, latency, validation
 
     CO->>CW: Log request metrics
     CO-->>AG: ChatResponse
@@ -76,6 +91,7 @@ sequenceDiagram
   "tenant_id": "acme-corp",
   "conversation_id": "conv-abc123",
   "use_rag": true,
+  "validate_response": true,
   "rag_options": {
     "top_k": 3,
     "min_score": 0.5
@@ -106,11 +122,239 @@ sequenceDiagram
     "latency": {
       "rag_ms": 1200.5,
       "bedrock_ms": 2500.3,
-      "total_ms": 3700.8
+      "validation_ms": 150.2,
+      "total_ms": 3850.0
+    },
+    "validation": {
+      "is_valid": true,
+      "action": "PASS",
+      "was_modified": false,
+      "validation_skipped": false,
+      "rules_evaluated": 3,
+      "fallback_used": false,
+      "fallback_reason": null
     }
   }
 }
 ```
+
+---
+
+## Response Validation Flow
+
+### Overview
+
+The Response Validator is invoked by the Chat Orchestrator after Bedrock generates a response. It validates the response and returns either the original, modified, or a fallback response.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CO as Chat Orchestrator
+    participant RV as Response Validator
+    participant CP as Amazon Comprehend
+    participant CW as CloudWatch
+
+    CO->>RV: Invoke Lambda<br/>{"response_text": "...", "user_message": "..."}
+
+    Note over RV: 1. Parse request<br/>2. Initialize validation config
+
+    RV->>RV: Run Profanity Check (P5)
+
+    alt profanity detected
+        RV-->>CO: BLOCK + fallback response
+    end
+
+    RV->>RV: Run Length Check (P10)
+
+    alt too short
+        RV-->>CO: BLOCK + fallback response
+    else too long
+        RV->>RV: Smart truncate response
+    end
+
+    RV->>RV: Run Topic Rules (P20)
+
+    alt medical/legal/financial content
+        RV->>RV: Add appropriate disclaimer
+    end
+
+    RV->>CP: DetectPiiEntities<br/>{"Text": "...", "LanguageCode": "en"}
+    CP-->>RV: {Entities: [...]}
+
+    Note over RV: Merge Comprehend +<br/>regex PII detections
+
+    alt SSN or Credit Card detected
+        RV-->>CO: BLOCK + fallback response
+    else other PII detected
+        RV->>RV: Log warning, continue
+    end
+
+    Note over RV: Aggregate results<br/>Determine final action
+
+    RV->>CW: Publish validation metrics
+
+    RV-->>CO: ValidationResponse
+```
+
+### Request/Response Format
+
+**Request (Chat Orchestrator → Response Validator):**
+
+```json
+{
+  "response_text": "AI-generated response text...",
+  "user_message": "Original user question",
+  "conversation_id": "conv-abc123",
+  "tenant_id": "tenant-456",
+  "intent": "question",
+  "intent_confidence": 0.92,
+  "urgency": "low",
+  "message_count": 3,
+  "previous_intents": ["greeting", "question"]
+}
+```
+
+### Response Scenario A: Valid Response (PASS)
+
+```json
+{
+  "is_valid": true,
+  "action": "PASS",
+  "validated_response": "Original response unchanged",
+  "original_response": "Original response unchanged",
+  "was_modified": false,
+  "validation_results": {
+    "pii": { "passed": true, "detections": [], "blocked_types": [], "redacted_count": 0 },
+    "profanity": { "passed": true, "detected_terms": [], "severity": null },
+    "length": { "passed": true, "char_count": 150, "min_length": 20, "max_length": 2000, "was_truncated": false },
+    "business_rules": { "passed": true, "violations": [], "rules_evaluated": 3, "disclaimer_added": false }
+  },
+  "sentiment": null,
+  "escalation": null,
+  "metadata": {
+    "validation_time_ms": 125.5,
+    "rules_evaluated": 3,
+    "comprehend_calls": 1,
+    "fallback_used": false,
+    "fallback_reason": null,
+    "timestamp": "2025-12-27T10:30:00Z"
+  }
+}
+```
+
+### Response Scenario B: Modified Response (MODIFY)
+
+```json
+{
+  "is_valid": true,
+  "action": "MODIFY",
+  "validated_response": "Original text...\n\n**Disclaimer:** This is general information only and should not be considered medical advice. Please consult a healthcare professional.",
+  "original_response": "Original text...",
+  "was_modified": true,
+  "validation_results": {
+    "pii": { "passed": true, "detections": [], "blocked_types": [], "redacted_count": 0 },
+    "profanity": { "passed": true, "detected_terms": [], "severity": null },
+    "length": { "passed": true, "char_count": 200, "min_length": 20, "max_length": 2000, "was_truncated": false },
+    "business_rules": { "passed": true, "violations": [], "rules_evaluated": 3, "disclaimer_added": true }
+  },
+  "metadata": {
+    "validation_time_ms": 150.0,
+    "rules_evaluated": 3,
+    "comprehend_calls": 1,
+    "fallback_used": false,
+    "fallback_reason": null,
+    "timestamp": "2025-12-27T10:30:00Z"
+  }
+}
+```
+
+### Response Scenario C: Blocked Response (BLOCK)
+
+```json
+{
+  "is_valid": false,
+  "action": "BLOCK",
+  "validated_response": "I apologize, but I'm unable to provide that information. Please contact our support team for assistance.",
+  "original_response": "Your SSN is 123-45-6789...",
+  "was_modified": true,
+  "validation_results": {
+    "pii": {
+      "passed": false,
+      "detections": [
+        { "pii_type": "SSN", "action": "BLOCK", "confidence": 0.99, "start": 12, "end": 23 }
+      ],
+      "blocked_types": ["SSN"],
+      "redacted_count": 0
+    },
+    "profanity": { "passed": true, "detected_terms": [], "severity": null },
+    "length": { "passed": true, "char_count": 30, "min_length": 20, "max_length": 2000, "was_truncated": false },
+    "business_rules": { "passed": true, "violations": [], "rules_evaluated": 3, "disclaimer_added": false }
+  },
+  "metadata": {
+    "validation_time_ms": 200.0,
+    "rules_evaluated": 3,
+    "comprehend_calls": 1,
+    "fallback_used": true,
+    "fallback_reason": "pii_blocked",
+    "timestamp": "2025-12-27T10:30:00Z"
+  }
+}
+```
+
+### Validation Pipeline Internal Flow
+
+```mermaid
+flowchart TB
+    subgraph Response Validator Lambda
+        IN[Request] --> PARSE[Parse & Validate Input]
+        PARSE --> INIT[Initialize Config from Env]
+
+        INIT --> PROF{Profanity Check}
+        PROF -->|fail| BLOCK_PROF[BLOCK: Profanity]
+        PROF -->|pass| LEN{Length Check}
+
+        LEN -->|too short| BLOCK_LEN[BLOCK: Too Short]
+        LEN -->|too long| TRUNC[Truncate Response]
+        LEN -->|ok| TOPIC
+        TRUNC --> TOPIC
+
+        TOPIC{Topic Rules} -->|medical/legal/financial| DISCLAIM[Add Disclaimer]
+        TOPIC -->|ok| PII
+        DISCLAIM --> PII
+
+        PII[PII Detection] --> COMPREHEND[Call Comprehend]
+        COMPREHEND --> REGEX[Run Regex Patterns]
+        REGEX --> MERGE[Merge Detections]
+
+        MERGE --> PII_CHECK{Critical PII?}
+        PII_CHECK -->|SSN/CC| BLOCK_PII[BLOCK: PII]
+        PII_CHECK -->|other/none| AGG[Aggregate Results]
+
+        BLOCK_PROF --> FALLBACK[Use Fallback Response]
+        BLOCK_LEN --> FALLBACK
+        BLOCK_PII --> FALLBACK
+
+        AGG --> ACTION[Determine Final Action]
+        FALLBACK --> ACTION
+
+        ACTION --> METRICS[Publish Metrics]
+        METRICS --> OUT[Return Response]
+    end
+```
+
+### Data Transformation
+
+| Stage | Input | Output | Transformation |
+| ------- | ------- | -------- | ---------------- |
+| Parse | Lambda Event | ValidationRequest | JSON → Pydantic model |
+| Profanity | Response text | ProfanityResult | Text → detected terms |
+| Length | Response text | LengthResult | Text → char count, truncation |
+| Topics | Response text | TopicResult | Text → disclaimer if needed |
+| PII Detection | Response text | PIICheckResult | Text → PII entities |
+| Aggregation | All results | ValidationResponse | Determine final action |
+| Response | ValidationResponse | Lambda Response | Pydantic → JSON |
 
 ---
 
@@ -522,6 +766,7 @@ sequenceDiagram
     participant RV as Response Validator
     participant DDB as DynamoDB
     participant BR as Amazon Bedrock
+    participant CP as Comprehend
 
     C->>AG: POST /chat<br/>{"message": "..."}
     AG->>SF: Start Execution
@@ -546,7 +791,13 @@ sequenceDiagram
         BH-->>SF: {response}
 
         SF->>RV: Validate Response
-        RV-->>SF: {is_safe, validated_response}
+        RV->>CP: Detect PII
+        CP-->>RV: PII entities
+        RV-->>SF: {is_valid, action, validated_response}
+
+        alt response blocked
+            SF->>SF: Use fallback response
+        end
     end
 
     SF->>DDB: Save message + response
@@ -570,10 +821,13 @@ stateDiagram-v2
     RetrieveRAG --> GenerateResponse
     GenerateResponse --> ValidateResponse
 
-    ValidateResponse --> SaveResponse: valid
-    ValidateResponse --> GenerateFallback: invalid
+    ValidateResponse --> CheckValidation
+    CheckValidation --> SaveResponse: PASS
+    CheckValidation --> ApplyModification: MODIFY
+    CheckValidation --> UseFallback: BLOCK
 
-    GenerateFallback --> SaveResponse
+    ApplyModification --> SaveResponse
+    UseFallback --> SaveResponse
 
     InitiateEscalation --> NotifyAgent
     NotifyAgent --> SaveResponse
@@ -586,7 +840,7 @@ stateDiagram-v2
 
 ## Error Handling Flows
 
-### Validation Error
+### Validation Error (Input)
 
 ```mermaid
 sequenceDiagram
@@ -610,6 +864,7 @@ sequenceDiagram
     participant CO as Chat Orchestrator
     participant RR as RAG Retriever
     participant BH as Bedrock Handler
+    participant RV as Response Validator
     participant CW as CloudWatch
 
     CO->>RR: Invoke
@@ -621,6 +876,9 @@ sequenceDiagram
 
     CO->>BH: Invoke (empty rag_context)
     BH-->>CO: Response (without RAG)
+
+    CO->>RV: Validate response
+    RV-->>CO: Validation result
 
     CO-->>CO: Return response<br/>(rag_skipped: true)
 ```
@@ -648,6 +906,58 @@ sequenceDiagram
 
     CO->>CW: Log error
     CO-->>CO: Return error to client
+```
+
+### Response Validation Error (Fail-Open)
+
+```mermaid
+sequenceDiagram
+    participant CO as Chat Orchestrator
+    participant RV as Response Validator
+    participant CP as Comprehend
+    participant CW as CloudWatch
+
+    CO->>RV: Invoke<br/>{"response_text": "...", "user_message": "..."}
+
+    RV->>CP: DetectPiiEntities
+    CP-->>RV: Error (throttled/unavailable)
+
+    Note over RV: FAIL_OPEN_ON_ERROR = true<br/>Return original response
+
+    RV->>CW: Log error (warning)
+    RV->>CW: Increment FallbackUsed metric
+
+    RV-->>CO: {is_valid: true, action: "WARN",<br/>validated_response: <original>}
+
+    Note over CO: Continue with original response<br/>(validation_error logged)
+```
+
+### Response Blocked (PII Detected)
+
+```mermaid
+sequenceDiagram
+    participant CO as Chat Orchestrator
+    participant RV as Response Validator
+    participant CP as Comprehend
+    participant CW as CloudWatch
+
+    CO->>RV: Invoke<br/>{"response_text": "Your SSN is 123-45-6789"}
+
+    RV->>RV: Run regex patterns
+    Note over RV: SSN pattern matched
+
+    RV->>CP: DetectPiiEntities
+    CP-->>RV: {Entities: [{Type: "SSN", Score: 0.99}]}
+
+    Note over RV: Critical PII detected<br/>Action: BLOCK
+
+    RV->>CW: Log PII detection
+    RV->>CW: Increment PIIDetected metric
+    RV->>CW: Increment ValidationBlocked metric
+
+    RV-->>CO: {is_valid: false, action: "BLOCK",<br/>validated_response: <fallback>}
+
+    Note over CO: Use fallback response<br/>Original never sent to customer
 ```
 
 ### DynamoDB Error
@@ -722,6 +1032,7 @@ flowchart LR
         CO[Chat Orchestrator]
         RR[RAG Retriever]
         BH[Bedrock Handler]
+        RV[Response Validator]
     end
 
     subgraph X-Ray
@@ -733,8 +1044,22 @@ flowchart LR
     CO -->|segment| TRACES
     RR -->|segment| TRACES
     BH -->|segment| TRACES
+    RV -->|segment| TRACES
     TRACES --> MAP
 ```
+
+### Validation Metrics
+
+| Metric | Unit | Description |
+| -------- | ------ | ------------- |
+| ValidationCount | Count | Total validation requests |
+| ValidationBlocked | Count | Responses blocked |
+| ValidationModified | Count | Responses modified |
+| PIIDetected | Count | PII detection events |
+| ProfanityDetected | Count | Profanity detection events |
+| ValidationLatency | Milliseconds | Validation processing time |
+| ComprehendCalls | Count | Comprehend API calls |
+| FallbackUsed | Count | Fallback response used |
 
 ---
 
@@ -745,4 +1070,5 @@ flowchart LR
 - [ADR-009: Bedrock Integration](../adr/ADR-009-bedrock-integration.md) — Bedrock design
 - [ADR-010: Knowledge Base RAG](../adr/ADR-010-knowledge-base-rag.md) — RAG architecture
 - [ADR-011: Orchestrator Pattern](../adr/ADR-011-orchestrator-pattern.md) — Orchestration design
+- [ADR-012: Response Validation Strategy](../adr/ADR-012-response-validation.md) — Validation design
 - [Build & Deploy Architecture](../build-deploy-architecture.md) — Deployment flows

@@ -1,14 +1,14 @@
 # System Design
 
-**Last Updated:** December 2025
-**Status:** Phase 2 Complete
+**Last Updated:** December 27th, 2025
+**Status:** Phase 3.1 Complete
 
 ---
 
 ## Overview
 
 The AI Customer Service Bot is a serverless, event-driven platform that provides intelligent customer support through natural language processing and AI-powered responses
-using Amazon Bedrock and RAG (Retrieval-Augmented Generation).
+using Amazon Bedrock and RAG (Retrieval-Augmented Generation), with comprehensive response validation for safety and compliance.
 
 ---
 
@@ -21,10 +21,11 @@ using Amazon Bedrock and RAG (Retrieval-Augmented Generation).
 5. **Observability by Default** — Logging, tracing, and metrics built-in
 6. **Security in Depth** — Encryption, least-privilege IAM, input validation
 7. **Stateless Handlers** — Lambdas are stateless for testability and reusability
+8. **Fail-Safe Design** — Validation layer fails open to avoid blocking customers
 
 ---
 
-## Current Architecture (Phase 2)
+## Current Architecture (Phase 3.1)
 
 ### High-Level View
 
@@ -48,11 +49,13 @@ flowchart TB
             CB[Context Builder<br/>Lambda]
             RR[RAG Retriever<br/>Lambda]
             BH[Bedrock Handler<br/>Lambda]
+            RV[Response Validator<br/>Lambda]
         end
 
         subgraph AI/ML Layer
             KB[Bedrock Knowledge Base]
             BEDROCK[Amazon Bedrock<br/>Claude Haiku 4.5]
+            COMPREHEND[Amazon Comprehend<br/>PII Detection]
         end
 
         subgraph Data Layer
@@ -77,19 +80,23 @@ flowchart TB
     APIGW -->|AWS_PROXY| IC
     CO -->|invoke| RR
     CO -->|invoke| BH
+    CO -->|invoke| RV
     RR -->|retrieve| KB
     KB -->|embeddings| AURORA
     KB -->|documents| S3
     BH -->|converse| BEDROCK
+    RV -->|detect PII| COMPREHEND
     CB -->|Query/Put| DDB
     IC -.->|uses| LAYER
     CB -.->|uses| LAYER
     CO -.->|uses| LAYER
     RR -.->|uses| LAYER
     BH -.->|uses| LAYER
+    RV -.->|uses| LAYER
     CO -->|logs| CW
     RR -->|logs| CW
     BH -->|logs| CW
+    RV -->|logs| CW
     IC -->|logs| CW
     CB -->|logs| CW
     CO -->|traces| XRAY
@@ -107,6 +114,8 @@ sequenceDiagram
     participant KB as Knowledge Base
     participant BH as Bedrock Handler
     participant BR as Amazon Bedrock
+    participant RV as Response Validator
+    participant CP as Comprehend
 
     C->>AG: POST /chat<br/>{"message": "...", "tenant_id": "..."}
 
@@ -128,6 +137,14 @@ sequenceDiagram
     BR-->>BH: AI Response + token usage
     BH-->>CO: {response_text, model_id, tokens}
 
+    Note over CO: Validate response before returning
+
+    CO->>RV: Invoke (sync)<br/>{"response_text": "...", "user_message": "..."}
+    RV->>CP: Detect PII Entities
+    CP-->>RV: PII detections
+    Note over RV: Run business rules<br/>(profanity, length, disclaimers)
+    RV-->>CO: {validated_response, action, metadata}
+
     Note over CO: Assemble final response
 
     CO-->>AG: ChatResponse
@@ -143,7 +160,8 @@ flowchart LR
         CO_VAL --> CO_RAG[Invoke RAG]
         CO_RAG --> CO_CTX[Build Context]
         CO_CTX --> CO_BED[Invoke Bedrock]
-        CO_BED --> CO_OUT[Response]
+        CO_BED --> CO_VALID[Invoke Validator]
+        CO_VALID --> CO_OUT[Response]
     end
 
     subgraph RAG Retriever
@@ -156,6 +174,14 @@ flowchart LR
         BH_IN[Request] --> BH_PROMPT[Build Prompt]
         BH_PROMPT --> BH_INVOKE[Invoke Model]
         BH_INVOKE --> BH_OUT[Response]
+    end
+
+    subgraph Response Validator
+        RV_IN[Response] --> RV_PII[PII Detection]
+        RV_PII --> RV_RULES[Business Rules]
+        RV_RULES --> RV_LENGTH[Length Check]
+        RV_LENGTH --> RV_ACTION[Determine Action]
+        RV_ACTION --> RV_OUT[Validated Response]
     end
 
     subgraph Intent Classifier
@@ -190,6 +216,91 @@ sequenceDiagram
     L->>CW: Log & Metrics
     L-->>AG: Response
     AG-->>C: HTTP Response
+```
+
+---
+
+## Response Validation Layer
+
+### Overview
+
+The Response Validator is a Lambda function that validates all AI-generated responses before delivery to customers.
+It acts as a safety guardrail ensuring responses meet quality, safety, and compliance requirements.
+
+### Position in Architecture
+
+```bash
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Chat Orchestrator                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────┐    ┌─────────────┐    ┌──────────────────┐               │
+│   │    RAG      │───▶│   Bedrock   │───▶│    Response      │───▶ Customer  │
+│   │  Retriever  │    │   Handler   │    │    Validator     │               │
+│   └─────────────┘    └─────────────┘    └──────────────────┘               │
+│                                                │                            │
+│                                         ┌──────┴──────┐                     │
+│                                         ▼             ▼                     │
+│                                   ┌─────────┐   ┌──────────┐               │
+│                                   │ Amazon  │   │ Business │               │
+│                                   │Comprehend│   │  Rules   │               │
+│                                   └─────────┘   └──────────┘               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Validation Pipeline
+
+The validator runs checks in priority order:
+
+| Priority | Check | Action on Failure |
+| ---------- | ------- | ------------------- |
+| P5 | Profanity | BLOCK |
+| P10 | Length | BLOCK (too short) or MODIFY (truncate) |
+| P20 | Topic Restrictions | MODIFY (add disclaimer) |
+| P30 | PII Detection | BLOCK (SSN/CC) or WARN (other) |
+
+### PII Detection Strategy
+
+**Hybrid Approach:**
+
+1. **Amazon Comprehend** — ML-based detection for names, addresses, emails
+2. **Regex Patterns** — Deterministic detection for SSN, credit cards, order IDs
+
+**PII Actions:**
+
+| PII Type | Action | Rationale |
+| ---------- | -------- | ----------- |
+| SSN | BLOCK | Critical - never expose |
+| Credit Card | BLOCK | Critical - PCI compliance |
+| Phone | REDACT | Moderate - mask in logs |
+| Name | WARN | Low risk - log only |
+| Order ID | ALLOW | Business identifier |
+
+### Validation Actions
+
+| Action | Description |
+| -------- | ------------- |
+| `PASS` | Response is valid, no changes needed |
+| `MODIFY` | Response modified (truncated, disclaimer added) |
+| `BLOCK` | Response blocked, fallback message used |
+| `WARN` | Response passed with warnings logged |
+
+### Error Handling (Fail-Open Design)
+
+When validation errors occur, the system returns the original response with a WARN action rather than blocking the customer interaction.
+
+```python
+# Fail-open behavior
+try:
+    result = validator.validate(response)
+except Exception:
+    return ValidationResponse(
+        is_valid=True,
+        action=ValidationAction.WARN,
+        validated_response=original_response,
+        metadata={"fallback_reason": "validation_error"}
+    )
 ```
 
 ---
@@ -232,7 +343,7 @@ flowchart TB
     subgraph AI/ML Layer
         BEDROCK[Amazon Bedrock<br/>Claude]
         KB[Knowledge Base<br/>RAG]
-        COMPREHEND[Amazon Comprehend<br/>Sentiment]
+        COMPREHEND[Amazon Comprehend<br/>PII & Sentiment]
     end
 
     subgraph Data Layer
@@ -313,10 +424,62 @@ stateDiagram-v2
 
 ## Component Specifications
 
+### Response Validator Lambda
+
+| Attribute | Value |
+| ----------- | ------- |
+| Runtime | Python 3.12 |
+| Memory | 512 MB |
+| Timeout | 30 seconds |
+| Trigger | Direct invocation (from Orchestrator) |
+| Layer | shared-layer |
+
+**Responsibilities:**
+
+- Detect and handle PII in AI responses (Comprehend + regex)
+- Filter profanity and inappropriate language
+- Enforce response length constraints
+- Add disclaimers for medical/legal/financial content
+- Calculate escalation scores
+- Return validated/modified responses
+
+**Sub-Components:**
+
+```bash
+response-validator/
+├── handler.py          # Lambda entry point, error handling
+├── service.py          # Orchestration layer, fail-open logic
+├── pii_detector.py     # PII detection (Comprehend + regex)
+├── rules.py            # Business rules engine
+└── models.py           # Pydantic request/response models
+```
+
+**Configuration:**
+
+| Variable | Default | Description |
+| ---------- | --------- | ------------- |
+| `ENABLE_PII_DETECTION` | `true` | Enable PII detection via Comprehend |
+| `ENABLE_PROFANITY_CHECK` | `true` | Enable profanity filtering |
+| `ENABLE_BUSINESS_RULES` | `true` | Enable topic restriction rules |
+| `ENABLE_LENGTH_CHECK` | `true` | Enable length validation |
+| `MIN_RESPONSE_LENGTH` | `20` | Minimum response length (chars) |
+| `MAX_RESPONSE_LENGTH` | `2000` | Maximum response length (chars) |
+| `TRUNCATE_LONG_RESPONSES` | `true` | Auto-truncate long responses |
+| `FAIL_OPEN_ON_ERROR` | `false` | Return original on validation errors |
+
+**Performance Characteristics:**
+
+| Metric | Target | Notes |
+| -------- | -------- | ------- |
+| P50 Latency | < 200ms | Without Comprehend |
+| P99 Latency | < 800ms | With Comprehend call |
+| Cold Start | < 2s | With provisioned concurrency |
+| Memory | < 256MB | Typical usage |
+
 ### Chat Orchestrator Lambda
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Runtime | Python 3.12 |
 | Memory | 512 MB |
 | Timeout | 29 seconds |
@@ -325,20 +488,20 @@ stateDiagram-v2
 
 **Responsibilities:**
 
-- Coordinate chat flow between RAG and Bedrock
+- Coordinate chat flow between RAG, Bedrock, and Validator
 - Generate conversation IDs when not provided
-- Aggregate latency metrics
+- Aggregate latency metrics (RAG, Bedrock, validation, total)
 - Handle errors from downstream services
-- Return unified response format
+- Return unified response format with validation metadata
 
 **Endpoints:**
 
-- `POST /chat` — Full chat flow with RAG-enhanced AI responses
+- `POST /chat` — Full chat flow with RAG-enhanced, validated AI responses
 
 ### RAG Retriever Lambda
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Runtime | Python 3.12 |
 | Memory | 256 MB |
 | Timeout | 30 seconds |
@@ -361,7 +524,7 @@ stateDiagram-v2
 ### Bedrock Handler Lambda
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Runtime | Python 3.12 |
 | Memory | 512 MB |
 | Timeout | 30 seconds |
@@ -385,7 +548,7 @@ stateDiagram-v2
 ### Knowledge Base
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Type | Bedrock Knowledge Base |
 | Vector Store | Aurora PostgreSQL Serverless v2 |
 | Embedding Model | amazon.titan-embed-text-v2:0 |
@@ -406,7 +569,7 @@ stateDiagram-v2
 ### Intent Classifier Lambda
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Runtime | Python 3.12 |
 | Memory | 256 MB |
 | Timeout | 30 seconds |
@@ -433,7 +596,7 @@ stateDiagram-v2
 ### Context Builder Lambda
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Runtime | Python 3.12 |
 | Memory | 512 MB |
 | Timeout | 30 seconds |
@@ -451,7 +614,7 @@ stateDiagram-v2
 ### DynamoDB Table
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Table Name | conversations |
 | Billing Mode | On-demand (PAY_PER_REQUEST) |
 | Primary Key | pk (HASH), sk (RANGE) |
@@ -468,7 +631,7 @@ See [ADR-008](../adr/ADR-008-dynamodb-schema-design.md) for schema details.
 ### Shared Lambda Layer
 
 | Attribute | Value |
-|-----------|-------|
+| ----------- | ------- |
 | Runtime | Python 3.12 |
 | Size | ~15 MB |
 | Build | Docker (Amazon Linux 2) |
@@ -506,6 +669,11 @@ flowchart TB
             AURORA[(Aurora PostgreSQL<br/>Encryption at rest)]
         end
 
+        subgraph AI Services
+            BEDROCK[Bedrock<br/>Least-privilege IAM]
+            COMPREHEND[Comprehend<br/>PII Detection only]
+        end
+
         subgraph Secrets
             SM[Secrets Manager]
             KMS[KMS Keys]
@@ -517,6 +685,8 @@ flowchart TB
     APIGW -->|IAM Auth| LAMBDA
     LAMBDA -->|IAM Role| DDB
     LAMBDA -->|IAM Role| AURORA
+    LAMBDA -->|IAM Role| BEDROCK
+    LAMBDA -->|IAM Role| COMPREHEND
     LAMBDA -.->|Decrypt| KMS
     LAMBDA -.->|Retrieve| SM
     DDB -.->|Encrypt| KMS
@@ -526,17 +696,22 @@ flowchart TB
 ### Security Controls
 
 | Layer | Control | Status |
-|-------|---------|--------|
+| ------- | --------- | -------- |
 | Edge | AWS WAF | 📋 Planned |
 | Transport | TLS 1.2+ | ✅ Enabled |
 | API | Request validation | ✅ Enabled |
 | API | Throttling | ✅ Enabled (100/50) |
 | API | Authentication | 📋 Planned (Cognito) |
 | Compute | Least-privilege IAM | ✅ Enabled |
+| AI | Comprehend PII only | ✅ Enabled |
+| Response | PII detection & blocking | ✅ Enabled |
+| Response | Profanity filtering | ✅ Enabled |
+| Response | Content safety rules | ✅ Enabled |
 | Data | DynamoDB encryption at rest | ✅ Enabled (KMS) |
 | Data | Aurora encryption at rest | ✅ Enabled (KMS) |
 | Data | S3 encryption | ✅ Enabled (SSE-S3) |
 | Logs | Encryption | ✅ Enabled (KMS) |
+| Logs | PII masked before logging | ✅ Enabled |
 | Secrets | Secrets Manager | 📋 Planned |
 
 ---
@@ -550,6 +725,7 @@ flowchart LR
         APIGW[API Gateway Logs]
         DDB[DynamoDB Metrics]
         BEDROCK[Bedrock Metrics]
+        COMPREHEND[Comprehend Metrics]
     end
 
     subgraph Collection
@@ -575,6 +751,7 @@ flowchart LR
     APIGW --> CW_LOGS
     DDB --> CW_METRICS
     BEDROCK --> CW_METRICS
+    COMPREHEND --> CW_METRICS
 
     CW_LOGS --> INSIGHTS
     CW_METRICS --> DASH
@@ -588,7 +765,7 @@ flowchart LR
 ### Metrics Collected
 
 | Metric | Source | Purpose |
-|--------|--------|---------|
+| -------- | -------- | --------- |
 | Invocations | Lambda | Usage tracking |
 | Duration | Lambda | Performance |
 | Errors | Lambda | Reliability |
@@ -605,6 +782,25 @@ flowchart LR
 | DocumentsRetrieved | RAG Retriever | RAG effectiveness |
 | RetrievalLatency | RAG Retriever | RAG performance |
 | AverageRelevanceScore | RAG Retriever | RAG quality |
+| ValidationCount | Response Validator | Total validations |
+| ValidationBlocked | Response Validator | Blocked responses |
+| ValidationModified | Response Validator | Modified responses |
+| PIIDetected | Response Validator | PII detection events |
+| ValidationLatency | Response Validator | Processing time |
+| ComprehendCalls | Response Validator | Comprehend API calls |
+| FallbackUsed | Response Validator | Fallback activations |
+
+### Alarms
+
+| Alarm | Threshold | Severity |
+| -------- | ----------- | ---------- |
+| Lambda Error Rate | > 5% in 5 min | High |
+| Lambda P99 Latency | > 5 seconds | Medium |
+| Lambda Throttling | > 0 in 1 min | High |
+| DynamoDB Throttling | > 0 in 1 min | High |
+| Bedrock Throttling | > 0 in 5 min | Medium |
+| Validation Block Rate | > 10% in 15 min | Medium |
+| PII Detection Spike | > 50 in 5 min | High |
 
 ---
 
@@ -644,3 +840,4 @@ flowchart LR
 - [ADR-009: Bedrock Integration](../adr/ADR-009-bedrock-integration.md)
 - [ADR-010: Knowledge Base RAG](../adr/ADR-010-knowledge-base-rag.md)
 - [ADR-011: Orchestrator Pattern](../adr/ADR-011-orchestrator-pattern.md)
+- [ADR-012: Response Validation Strategy](../adr/ADR-012-response-validation.md)
