@@ -103,6 +103,18 @@ class EscalationMetrics(BaseModel):
     low_confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class EscalationRoutingMetrics(BaseModel):
+    """Metrics from escalation routing (Phase 3.3)."""
+
+    routed: bool = Field(default=False, description="Whether escalation was routed to agents")
+    escalation_id: str | None = Field(default=None, description="Unique escalation identifier")
+    priority: str | None = Field(default=None, description="Priority tier: CRITICAL, HIGH, NORMAL")
+    queue_message_id: str | None = Field(default=None, description="SQS message ID if queued")
+    estimated_wait: str | None = Field(default=None, description="Estimated wait time for agent")
+    routing_error: bool = Field(default=False, description="Whether routing encountered an error")
+    error_message: str | None = Field(default=None, description="Error message if routing failed")
+
+
 class ChatMetadata(BaseModel):
     """Metadata for the chat response."""
 
@@ -118,6 +130,9 @@ class ChatMetadata(BaseModel):
     )
     escalation: EscalationMetrics | None = Field(
         default=None, description="Escalation scoring metrics (Phase 3.2)"
+    )
+    escalation_routing: EscalationRoutingMetrics | None = Field(
+        default=None, description="Escalation routing metrics (Phase 3.3)"
     )
 
 
@@ -144,12 +159,14 @@ class ChatResponse(BaseModel):
         validation_latency_ms: float | None = None,
         total_latency_ms: float = 0.0,
         validation_result: dict[str, Any] | None = None,
+        escalation_routing_result: dict[str, Any] | None = None,
     ) -> "ChatResponse":
         """Factory method to create a ChatResponse."""
         # Build validation metrics from result
         validation_metrics = None
         sentiment_metrics = None
         escalation_metrics = None
+        escalation_routing_metrics = None
 
         if validation_result is not None:
             validation_metrics = ValidationMetrics(
@@ -187,6 +204,18 @@ class ChatResponse(BaseModel):
                     low_confidence_score=factors.get("low_confidence", 0.0),
                 )
 
+        # Extract escalation routing metrics (Phase 3.3)
+        if escalation_routing_result is not None:
+            escalation_routing_metrics = EscalationRoutingMetrics(
+                routed=escalation_routing_result.get("success", False),
+                escalation_id=escalation_routing_result.get("escalation_id"),
+                priority=escalation_routing_result.get("priority"),
+                queue_message_id=escalation_routing_result.get("queue_message_id"),
+                estimated_wait=escalation_routing_result.get("estimated_wait"),
+                routing_error=escalation_routing_result.get("routing_error", False),
+                error_message=escalation_routing_result.get("error_message"),
+            )
+
         return cls(
             conversation_id=conversation_id,
             message_id=f"msg-{uuid4().hex[:12]}",
@@ -205,6 +234,7 @@ class ChatResponse(BaseModel):
                 validation=validation_metrics,
                 sentiment=sentiment_metrics,
                 escalation=escalation_metrics,
+                escalation_routing=escalation_routing_metrics,
             ),
         )
 
