@@ -8,7 +8,7 @@ A **production-grade, AI-powered customer service platform** built on AWS with *
 
 This project demonstrates advanced **cloud engineering** and **AI/ML integration** for customer service automation using:
 
-- **AI/ML:** Amazon Bedrock (Claude Haiku 4.5), RAG with Knowledge Bases, intent classification
+- **AI/ML:** Amazon Bedrock (Claude Haiku 4.5), RAG with Knowledge Bases, intent classification, sentiment analysis
 - **Compute:** AWS Lambda (Python 3.12), Lambda Layers
 - **Orchestration:** Chat Orchestrator, API Gateway
 - **Data:** DynamoDB (single-table design), Aurora PostgreSQL (pgvector), S3
@@ -41,13 +41,14 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 | S3 Document Store | ✅ Deployed | FAQ and documentation storage for RAG |
 | POST /chat Endpoint | ✅ Deployed | Unified chat API with RAG-enhanced responses |
 
-### Phase 3: Response Validation & Sentiment 🚧
+### Phase 3: Response Validation & Sentiment ✅
 
 | Component | Status | Description |
 | ----------- | -------- | ------------- |
 | Response Validator Lambda | ✅ Deployed | PII detection, profanity filter, business rules, length validation |
 | Chat Orchestrator Integration | ✅ Deployed | Validation step added to orchestration flow |
-| Sentiment Analyzer | 📋 Planned | Amazon Comprehend integration for sentiment scoring |
+| Sentiment Analyzer | ✅ Deployed | Amazon Comprehend integration for sentiment scoring |
+| Escalation Scoring | ✅ Deployed | Weighted 5-factor escalation algorithm |
 | Escalation Router | 📋 Planned | Priority-based routing to human agents |
 
 ### Future Phases 📋
@@ -114,6 +115,8 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
                     │  • Profanity filtering       │
                     │  • Business rules engine     │
                     │  • Length validation         │
+                    │  • Sentiment analysis        │
+                    │  • Escalation scoring        │
                     └──────────────┬───────────────┘
                                    │
                                    ▼
@@ -178,7 +181,7 @@ See [`docs/architecture/`](docs/architecture/) for detailed design documents.
 
 ## 🧩 Components
 
-### Response Validator Lambda (NEW)
+### Response Validator Lambda
 
 Validates all AI-generated responses before delivery to customers, ensuring safety and compliance.
 
@@ -188,10 +191,11 @@ Validates all AI-generated responses before delivery to customers, ensuring safe
   - **Profanity Filter:** Blocks inappropriate language
   - **Length Validation:** Enforces min/max length, smart truncation
   - **Business Rules:** Adds disclaimers for medical/legal/financial advice
-  - **Escalation Scoring:** Calculates when to escalate to human agents
+  - **Sentiment Analysis:** Analyzes user message sentiment via Amazon Comprehend
+  - **Escalation Scoring:** Calculates when to escalate to human agents (5-factor weighted algorithm)
   - **Fail-Open Design:** Returns original response on validation errors
 - **Performance:** 512 MB memory, ~200-500ms execution time
-- **Test Coverage:** 80%+ (140+ unit tests)
+- **Test Coverage:** 80%+ (170+ unit tests)
 
 **Validation Actions:**
 
@@ -202,6 +206,16 @@ Validates all AI-generated responses before delivery to customers, ensuring safe
 | `BLOCK` | Response blocked, fallback message used |
 | `WARN` | Response passed with warnings logged |
 
+**Escalation Factors (Weighted Algorithm):**
+
+| Factor | Weight | Description |
+| -------- | -------- | ------------- |
+| Explicit Intent | 0.35 | User explicitly requests human agent |
+| Negative Sentiment | 0.25 | Comprehend negative sentiment score |
+| Urgency | 0.20 | High/medium/low urgency classification |
+| Repeated Question | 0.15 | Same intent asked multiple times |
+| Low Confidence | 0.05 | Intent classifier confidence below threshold |
+
 **Configuration:**
 
 | Variable | Default | Description |
@@ -209,11 +223,14 @@ Validates all AI-generated responses before delivery to customers, ensuring safe
 | `ENABLE_PII_DETECTION` | `true` | Enable PII detection via Comprehend |
 | `ENABLE_PROFANITY_CHECK` | `true` | Enable profanity filtering |
 | `ENABLE_BUSINESS_RULES` | `true` | Enable topic restriction rules |
+| `ENABLE_SENTIMENT_ANALYSIS` | `true` | Enable sentiment analysis via Comprehend |
+| `ENABLE_ESCALATION_SCORING` | `true` | Enable escalation score calculation |
+| `ESCALATION_THRESHOLD` | `0.70` | Score threshold to trigger escalation |
 | `MIN_RESPONSE_LENGTH` | `20` | Minimum response length (chars) |
 | `MAX_RESPONSE_LENGTH` | `2000` | Maximum response length (chars) |
 | `FAIL_OPEN_ON_ERROR` | `false` | Return original on validation errors |
 
-See [ADR-012](docs/adr/ADR-012-response-validation.md) for design decisions.
+See [ADR-012](docs/adr/ADR-012-response-validation.md) and [ADR-013](docs/adr/ADR-013-sentiment-escalation.md) for design decisions.
 
 ### Chat Orchestrator Lambda
 
@@ -226,6 +243,7 @@ Orchestrates the complete chat flow, coordinating RAG retrieval, AI response gen
   - Invokes Response Validator for safety checks
   - Auto-generates conversation IDs
   - Aggregates latency metrics (RAG, Bedrock, validation, total)
+  - Returns sentiment and escalation data in response metadata
   - Resilient with retry logic (tenacity)
   - Configurable validation (`validate_response` flag)
 - **Performance:** 512 MB memory, ~8-10s total latency (cold), ~3-5s (warm)
@@ -410,7 +428,7 @@ curl -X POST "$(cd terraform/environments/dev && terraform output -raw classify_
 ai-customer-service-bot/
 ├── .github/                    # GitHub Actions workflows
 ├── docs/
-│   ├── adr/                    # Architecture Decision Records (ADR-001 to ADR-012)
+│   ├── adr/                    # Architecture Decision Records (ADR-001 to ADR-013)
 │   ├── architecture/           # System design docs
 │   │   ├── data-flow.md
 │   │   └── system-design.md
@@ -428,7 +446,7 @@ ai-customer-service-bot/
 │   │   ├── intent-classifier/  # ✅ Intent classification Lambda
 │   │   ├── metrics-publisher/  # 📋 Custom metrics (planned)
 │   │   ├── rag-retriever/      # ✅ Knowledge Base retrieval
-│   │   └── response-validator/ # ✅ Output validation and safety
+│   │   └── response-validator/ # ✅ Output validation, sentiment, escalation
 │   ├── layers/
 │   │   └── common/             # Shared Lambda layer
 │   └── step-functions/         # Step Functions definitions (planned)
@@ -544,6 +562,10 @@ make local-stop
 | ValidationModified | Response Validator | Modified responses |
 | PIIDetected | Response Validator | PII detection events |
 | ValidationLatency | Response Validator | Processing time |
+| SentimentAnalysisRequests | Response Validator | Sentiment analysis calls |
+| Sentiment_POSITIVE/NEGATIVE/NEUTRAL/MIXED | Response Validator | Sentiment distribution |
+| EscalationTriggered | Response Validator | Escalation events |
+| EscalationReason_* | Response Validator | Escalation by reason |
 
 ---
 
@@ -570,9 +592,9 @@ See [`docs/architecture/security.md`](docs/architecture/security.md) for detaile
 | CloudWatch | $1-3 |
 | Aurora Serverless v2 | $15-50 |
 | Bedrock (Claude Haiku) | $5-20 |
-| Comprehend (PII) | $1-5 |
+| Comprehend (PII + Sentiment) | $2-10 |
 | S3 | <$1 |
-| **Total** | **~$26-90** |
+| **Total** | **~$27-95** |
 
 Costs scale with usage. Aurora Serverless v2 is the primary cost driver in dev.
 
@@ -594,6 +616,7 @@ Costs scale with usage. Aurora Serverless v2 is the primary cost driver in dev.
 | [ADR-010](docs/adr/ADR-010-knowledge-base-rag.md) | Knowledge Base RAG |
 | [ADR-011](docs/adr/ADR-011-orchestrator-pattern.md) | Orchestrator Pattern |
 | [ADR-012](docs/adr/ADR-012-response-validation.md) | Response Validation Strategy |
+| [ADR-013](docs/adr/ADR-013-sentiment-escalation.md) | Sentiment Analysis & Escalation |
 
 ---
 

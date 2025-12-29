@@ -1,14 +1,14 @@
 # Data Flow
 
-**Last Updated:** December 2025
-**Status:** Phase 3.1 Complete
+**Last Updated:** December 28, 2025
+**Status:** Phase 3.2 Complete
 
 ---
 
 ## Overview
 
-This document describes the data flows within the AI Customer Service Bot, focusing on how customer messages are processed, how RAG retrieval works, how AI responses are generated, and how responses
-are validated for safety and compliance.
+This document describes the data flows within the AI Customer Service Bot, focusing on how customer messages are processed, how RAG retrieval works, how AI responses are generated, how responses
+are validated for safety and compliance, and how sentiment analysis and escalation scoring work.
 
 ---
 
@@ -62,19 +62,22 @@ sequenceDiagram
     BH-->>CO: {response_text, model_id, tokens}
     BH->>CW: Log Bedrock metrics
 
-    Note over CO: Validate response<br/>before returning
+    Note over CO: Validate response<br/>with sentiment & escalation
 
-    CO->>RV: Invoke Lambda<br/>{"response_text": "...", "user_message": "..."}
+    CO->>RV: Invoke Lambda<br/>{"response_text": "...", "user_message": "...",<br/>"intent": "...", "urgency": "...", "previous_intents": [...]}
 
-    RV->>CP: DetectPiiEntities
+    RV->>CP: DetectPiiEntities (response)
     CP-->>RV: PII detections
 
-    Note over RV: Run business rules<br/>(profanity, length, disclaimers)
+    RV->>CP: DetectSentiment (user_message)
+    CP-->>RV: Sentiment scores
 
-    RV-->>CO: {validated_response, action, metadata}
+    Note over RV: Run business rules<br/>Calculate escalation score
+
+    RV-->>CO: {validated_response, action,<br/>sentiment, escalation, metadata}
     RV->>CW: Log validation metrics
 
-    Note over CO: Assemble ChatResponse<br/>with sources, latency, validation
+    Note over CO: Assemble ChatResponse<br/>with sources, latency,<br/>sentiment, escalation
 
     CO->>CW: Log request metrics
     CO-->>AG: ChatResponse
@@ -122,8 +125,8 @@ sequenceDiagram
     "latency": {
       "rag_ms": 1200.5,
       "bedrock_ms": 2500.3,
-      "validation_ms": 150.2,
-      "total_ms": 3850.0
+      "validation_ms": 250.2,
+      "total_ms": 3950.0
     },
     "validation": {
       "is_valid": true,
@@ -133,6 +136,22 @@ sequenceDiagram
       "rules_evaluated": 3,
       "fallback_used": false,
       "fallback_reason": null
+    },
+    "sentiment": {
+      "sentiment": "NEUTRAL",
+      "confidence": 0.85,
+      "negative_score": 0.05
+    },
+    "escalation": {
+      "score": 0.15,
+      "needs_escalation": false,
+      "threshold": 0.70,
+      "primary_reason": null,
+      "explicit_intent_score": 0.0,
+      "negative_sentiment_score": 0.05,
+      "urgency_score": 0.0,
+      "repeated_question_score": 0.0,
+      "low_confidence_score": 0.0
     }
   }
 }
@@ -144,7 +163,8 @@ sequenceDiagram
 
 ### Overview
 
-The Response Validator is invoked by the Chat Orchestrator after Bedrock generates a response. It validates the response and returns either the original, modified, or a fallback response.
+The Response Validator is invoked by the Chat Orchestrator after Bedrock generates a response.
+It validates the response, analyzes sentiment, calculates escalation score, and returns either the original, modified, or a fallback response.
 
 ### Sequence Diagram
 
@@ -153,10 +173,12 @@ sequenceDiagram
     autonumber
     participant CO as Chat Orchestrator
     participant RV as Response Validator
+    participant SA as Sentiment Analyzer
+    participant ES as Escalation Scorer
     participant CP as Amazon Comprehend
     participant CW as CloudWatch
 
-    CO->>RV: Invoke Lambda<br/>{"response_text": "...", "user_message": "..."}
+    CO->>RV: Invoke Lambda<br/>{"response_text": "...", "user_message": "...",<br/>"intent": "...", "urgency": "...", "previous_intents": [...]}
 
     Note over RV: 1. Parse request<br/>2. Initialize validation config
 
@@ -180,7 +202,7 @@ sequenceDiagram
         RV->>RV: Add appropriate disclaimer
     end
 
-    RV->>CP: DetectPiiEntities<br/>{"Text": "...", "LanguageCode": "en"}
+    RV->>CP: DetectPiiEntities (response_text)
     CP-->>RV: {Entities: [...]}
 
     Note over RV: Merge Comprehend +<br/>regex PII detections
@@ -191,9 +213,21 @@ sequenceDiagram
         RV->>RV: Log warning, continue
     end
 
-    Note over RV: Aggregate results<br/>Determine final action
+    RV->>SA: Analyze sentiment (user_message)
+    SA->>CP: DetectSentiment
+    CP-->>SA: {Sentiment, SentimentScore}
+    SA->>SA: Detect explicit escalation (regex)
+    SA-->>RV: {sentiment, explicit_escalation}
+
+    RV->>ES: Calculate escalation score
+    Note over ES: 5-factor weighted algorithm:<br/>explicit_intent (0.35)<br/>negative_sentiment (0.25)<br/>urgency (0.20)<br/>repeated_question (0.15)<br/>low_confidence (0.05)
+    ES-->>RV: {score, needs_escalation, factors}
+
+    Note over RV: Aggregate all results<br/>Determine final action
 
     RV->>CW: Publish validation metrics
+    RV->>CW: Publish sentiment metrics
+    RV->>CW: Publish escalation metrics
 
     RV-->>CO: ValidationResponse
 ```
@@ -212,7 +246,14 @@ sequenceDiagram
   "intent_confidence": 0.92,
   "urgency": "low",
   "message_count": 3,
-  "previous_intents": ["greeting", "question"]
+  "previous_intents": ["greeting", "question"],
+  "options": {
+    "check_pii": true,
+    "check_profanity": true,
+    "check_business_rules": true,
+    "analyze_sentiment": true,
+    "calculate_escalation": true
+  }
 }
 ```
 
@@ -231,12 +272,33 @@ sequenceDiagram
     "length": { "passed": true, "char_count": 150, "min_length": 20, "max_length": 2000, "was_truncated": false },
     "business_rules": { "passed": true, "violations": [], "rules_evaluated": 3, "disclaimer_added": false }
   },
-  "sentiment": null,
-  "escalation": null,
+  "sentiment": {
+    "sentiment": "NEUTRAL",
+    "confidence": 0.85,
+    "scores": {
+      "positive": 0.10,
+      "negative": 0.05,
+      "neutral": 0.85,
+      "mixed": 0.00
+    }
+  },
+  "escalation": {
+    "score": 0.15,
+    "needs_escalation": false,
+    "threshold": 0.70,
+    "factors": {
+      "explicit_intent": 0.0,
+      "negative_sentiment": 0.05,
+      "urgency": 0.0,
+      "repeated_question": 0.0,
+      "low_confidence": 0.0
+    },
+    "primary_reason": null
+  },
   "metadata": {
-    "validation_time_ms": 125.5,
+    "validation_time_ms": 250.5,
     "rules_evaluated": 3,
-    "comprehend_calls": 1,
+    "comprehend_calls": 2,
     "fallback_used": false,
     "fallback_reason": null,
     "timestamp": "2025-12-27T10:30:00Z"
@@ -244,25 +306,48 @@ sequenceDiagram
 }
 ```
 
-### Response Scenario B: Modified Response (MODIFY)
+### Response Scenario B: Escalation Triggered
 
 ```json
 {
   "is_valid": true,
-  "action": "MODIFY",
-  "validated_response": "Original text...\n\n**Disclaimer:** This is general information only and should not be considered medical advice. Please consult a healthcare professional.",
-  "original_response": "Original text...",
-  "was_modified": true,
+  "action": "PASS",
+  "validated_response": "I understand your frustration. Let me help you.",
+  "original_response": "I understand your frustration. Let me help you.",
+  "was_modified": false,
   "validation_results": {
     "pii": { "passed": true, "detections": [], "blocked_types": [], "redacted_count": 0 },
     "profanity": { "passed": true, "detected_terms": [], "severity": null },
-    "length": { "passed": true, "char_count": 200, "min_length": 20, "max_length": 2000, "was_truncated": false },
-    "business_rules": { "passed": true, "violations": [], "rules_evaluated": 3, "disclaimer_added": true }
+    "length": { "passed": true, "char_count": 50, "min_length": 20, "max_length": 2000, "was_truncated": false },
+    "business_rules": { "passed": true, "violations": [], "rules_evaluated": 3, "disclaimer_added": false }
+  },
+  "sentiment": {
+    "sentiment": "NEGATIVE",
+    "confidence": 0.88,
+    "scores": {
+      "positive": 0.02,
+      "negative": 0.88,
+      "neutral": 0.05,
+      "mixed": 0.05
+    }
+  },
+  "escalation": {
+    "score": 0.78,
+    "needs_escalation": true,
+    "threshold": 0.70,
+    "factors": {
+      "explicit_intent": 1.0,
+      "negative_sentiment": 0.88,
+      "urgency": 1.0,
+      "repeated_question": 0.5,
+      "low_confidence": 0.0
+    },
+    "primary_reason": "Explicit escalation request"
   },
   "metadata": {
-    "validation_time_ms": 150.0,
+    "validation_time_ms": 280.0,
     "rules_evaluated": 3,
-    "comprehend_calls": 1,
+    "comprehend_calls": 2,
     "fallback_used": false,
     "fallback_reason": null,
     "timestamp": "2025-12-27T10:30:00Z"
@@ -292,6 +377,8 @@ sequenceDiagram
     "length": { "passed": true, "char_count": 30, "min_length": 20, "max_length": 2000, "was_truncated": false },
     "business_rules": { "passed": true, "violations": [], "rules_evaluated": 3, "disclaimer_added": false }
   },
+  "sentiment": null,
+  "escalation": null,
   "metadata": {
     "validation_time_ms": 200.0,
     "rules_evaluated": 3,
@@ -324,21 +411,43 @@ flowchart TB
         TOPIC -->|ok| PII
         DISCLAIM --> PII
 
-        PII[PII Detection] --> COMPREHEND[Call Comprehend]
-        COMPREHEND --> REGEX[Run Regex Patterns]
+        PII[PII Detection] --> COMPREHEND_PII[Call Comprehend DetectPiiEntities]
+        COMPREHEND_PII --> REGEX[Run Regex Patterns]
         REGEX --> MERGE[Merge Detections]
 
         MERGE --> PII_CHECK{Critical PII?}
         PII_CHECK -->|SSN/CC| BLOCK_PII[BLOCK: PII]
-        PII_CHECK -->|other/none| AGG[Aggregate Results]
+        PII_CHECK -->|other/none| SENTIMENT[Sentiment Analysis]
 
         BLOCK_PROF --> FALLBACK[Use Fallback Response]
         BLOCK_LEN --> FALLBACK
         BLOCK_PII --> FALLBACK
 
-        AGG --> ACTION[Determine Final Action]
-        FALLBACK --> ACTION
+        SENTIMENT --> COMPREHEND_SENT[Call Comprehend DetectSentiment]
+        COMPREHEND_SENT --> EXPLICIT[Detect Explicit Escalation]
+        EXPLICIT --> ESCALATION[Calculate Escalation Score]
 
+        subgraph Escalation Scorer
+            ESCALATION --> FACTOR1[Explicit Intent: 0.35]
+            ESCALATION --> FACTOR2[Negative Sentiment: 0.25]
+            ESCALATION --> FACTOR3[Urgency: 0.20]
+            ESCALATION --> FACTOR4[Repeated Question: 0.15]
+            ESCALATION --> FACTOR5[Low Confidence: 0.05]
+            FACTOR1 --> WEIGHTED[Weighted Sum]
+            FACTOR2 --> WEIGHTED
+            FACTOR3 --> WEIGHTED
+            FACTOR4 --> WEIGHTED
+            FACTOR5 --> WEIGHTED
+            WEIGHTED --> THRESHOLD{Score >= 0.70?}
+            THRESHOLD -->|yes| NEEDS_ESC[needs_escalation: true]
+            THRESHOLD -->|no| NO_ESC[needs_escalation: false]
+        end
+
+        NEEDS_ESC --> AGG[Aggregate Results]
+        NO_ESC --> AGG
+        FALLBACK --> AGG
+
+        AGG --> ACTION[Determine Final Action]
         ACTION --> METRICS[Publish Metrics]
         METRICS --> OUT[Return Response]
     end
@@ -353,8 +462,155 @@ flowchart TB
 | Length | Response text | LengthResult | Text → char count, truncation |
 | Topics | Response text | TopicResult | Text → disclaimer if needed |
 | PII Detection | Response text | PIICheckResult | Text → PII entities |
+| Sentiment | User message | SentimentResult | Text → sentiment scores |
+| Escalation | Multiple factors | EscalationResult | Factors → weighted score |
 | Aggregation | All results | ValidationResponse | Determine final action |
 | Response | ValidationResponse | Lambda Response | Pydantic → JSON |
+
+---
+
+## Sentiment Analysis Flow
+
+### Overview
+
+Sentiment analysis is performed on the **user message** (not the AI response) to understand customer emotion and contribute to escalation scoring.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant RV as Response Validator
+    participant SA as Sentiment Analyzer
+    participant CP as Amazon Comprehend
+    participant CW as CloudWatch
+
+    RV->>SA: analyze_with_escalation(user_message)
+
+    Note over SA: Check text length<br/>(min: 5, max: 5000 chars)
+
+    alt text too short
+        SA-->>RV: Neutral sentiment (default)
+    else text valid length
+        SA->>CP: DetectSentiment<br/>{"Text": "...", "LanguageCode": "en"}
+        CP-->>SA: {Sentiment, SentimentScore}
+    end
+
+    SA->>SA: Detect explicit escalation (regex)
+    Note over SA: Patterns:<br/>"speak to human/agent"<br/>"transfer me"<br/>"this isn't helping"<br/>"useless bot"
+
+    SA-->>RV: {SentimentResult, ExplicitEscalationResult}
+    RV->>CW: SentimentAnalysisRequests
+    RV->>CW: Sentiment_{POSITIVE|NEGATIVE|NEUTRAL|MIXED}
+```
+
+### Sentiment Result Structure
+
+```json
+{
+  "sentiment": "NEGATIVE",
+  "confidence": 0.88,
+  "scores": {
+    "positive": 0.02,
+    "negative": 0.88,
+    "neutral": 0.05,
+    "mixed": 0.05
+  }
+}
+```
+
+### Explicit Escalation Patterns
+
+| Pattern | Example Matches |
+| --------- | ----------------- |
+| `speak/talk to human/agent/person` | "I want to speak to a human" |
+| `need/want human/agent` | "I need a human agent" |
+| `transfer/connect/escalate to support` | "Transfer me to support" |
+| `real person` | "Can I talk to a real person?" |
+| `this isn't helping/working` | "This isn't helping at all" |
+| `useless/stupid bot` | "This useless bot" |
+| `stop talking to bot` | "I want to stop talking to this bot" |
+
+---
+
+## Escalation Scoring Flow
+
+### Overview
+
+Escalation scoring calculates a weighted score from 5 factors to determine if the conversation should be escalated to a human agent.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant RV as Response Validator
+    participant ES as Escalation Scorer
+    participant CW as CloudWatch
+
+    RV->>ES: calculate_score(<br/>sentiment, explicit_escalation,<br/>urgency, current_intent,<br/>previous_intents, intent_confidence)
+
+    Note over ES: Factor 1: Explicit Intent<br/>Weight: 0.35<br/>detected? → 1.0, else 0.0
+
+    Note over ES: Factor 2: Negative Sentiment<br/>Weight: 0.25<br/>Use Comprehend negative score
+
+    Note over ES: Factor 3: Urgency<br/>Weight: 0.20<br/>high/critical → 1.0<br/>medium → 0.5<br/>low → 0.0
+
+    Note over ES: Factor 4: Repeated Question<br/>Weight: 0.15<br/>2+ repeats → 1.0<br/>1 repeat → 0.5<br/>0 repeats → 0.0
+
+    Note over ES: Factor 5: Low Confidence<br/>Weight: 0.05<br/>if conf < 0.7 → (1.0 - conf)
+
+    ES->>ES: Calculate weighted sum
+    ES->>ES: Compare to threshold (0.70)
+    ES->>ES: Determine primary reason
+
+    ES-->>RV: EscalationResult
+
+    alt needs_escalation = true
+        RV->>CW: EscalationTriggered
+        RV->>CW: EscalationReason_{reason}
+    end
+```
+
+### Escalation Score Calculation
+
+```bash
+score = (0.35 × explicit_intent) +
+        (0.25 × negative_sentiment) +
+        (0.20 × urgency) +
+        (0.15 × repeated_question) +
+        (0.05 × low_confidence)
+
+needs_escalation = (score >= threshold)
+```
+
+### Factor Details
+
+| Factor | Weight | Input | Scoring |
+| -------- | -------- | ------- | --------- |
+| Explicit Intent | 0.35 | Regex detection | 1.0 if pattern matched, else 0.0 |
+| Negative Sentiment | 0.25 | Comprehend score | Direct negative score (0.0-1.0) |
+| Urgency | 0.20 | Intent classifier | high=1.0, medium=0.5, low=0.0 |
+| Repeated Question | 0.15 | previous_intents | Count of current_intent in history |
+| Low Confidence | 0.05 | intent_confidence | (1.0 - confidence) if < 0.7 |
+
+### Escalation Result Structure
+
+```json
+{
+  "score": 0.78,
+  "needs_escalation": true,
+  "threshold": 0.70,
+  "factors": {
+    "explicit_intent": 1.0,
+    "negative_sentiment": 0.88,
+    "urgency": 1.0,
+    "repeated_question": 0.5,
+    "low_confidence": 0.0
+  },
+  "primary_reason": "Explicit escalation request"
+}
+```
 
 ---
 
@@ -764,6 +1020,7 @@ sequenceDiagram
     participant RR as RAG Retriever
     participant BH as Bedrock Handler
     participant RV as Response Validator
+    participant ER as Escalation Router
     participant DDB as DynamoDB
     participant BR as Amazon Bedrock
     participant CP as Comprehend
@@ -774,8 +1031,8 @@ sequenceDiagram
     SF->>IC: Classify Intent
     IC-->>SF: {intent, confidence, entities}
 
-    alt needs_escalation
-        SF->>SF: Route to Escalation
+    alt needs_escalation (from intent)
+        SF->>ER: Route to Agent
     else normal_flow
         SF->>CB: Build Context
         CB->>DDB: Get conversation history
@@ -790,12 +1047,15 @@ sequenceDiagram
         BR-->>BH: AI Response
         BH-->>SF: {response}
 
-        SF->>RV: Validate Response
-        RV->>CP: Detect PII
-        CP-->>RV: PII entities
-        RV-->>SF: {is_valid, action, validated_response}
+        SF->>RV: Validate Response + Sentiment + Escalation
+        RV->>CP: Detect PII + Sentiment
+        CP-->>RV: Results
+        RV-->>SF: {is_valid, action, validated_response,<br/>sentiment, escalation}
 
-        alt response blocked
+        alt escalation.needs_escalation
+            SF->>ER: Route to Agent
+            ER-->>SF: {agent_assigned}
+        else response blocked
             SF->>SF: Use fallback response
         end
     end
@@ -822,11 +1082,15 @@ stateDiagram-v2
     GenerateResponse --> ValidateResponse
 
     ValidateResponse --> CheckValidation
-    CheckValidation --> SaveResponse: PASS
+    CheckValidation --> CheckEscalation: PASS
     CheckValidation --> ApplyModification: MODIFY
     CheckValidation --> UseFallback: BLOCK
 
-    ApplyModification --> SaveResponse
+    ApplyModification --> CheckEscalation
+
+    CheckEscalation --> SaveResponse: no escalation
+    CheckEscalation --> InitiateEscalation: needs escalation
+
     UseFallback --> SaveResponse
 
     InitiateEscalation --> NotifyAgent
@@ -932,6 +1196,28 @@ sequenceDiagram
     Note over CO: Continue with original response<br/>(validation_error logged)
 ```
 
+### Sentiment Analysis Error (Fail-Open)
+
+```mermaid
+sequenceDiagram
+    participant RV as Response Validator
+    participant SA as Sentiment Analyzer
+    participant CP as Comprehend
+    participant CW as CloudWatch
+
+    RV->>SA: analyze_with_escalation(user_message)
+
+    SA->>CP: DetectSentiment
+    CP-->>SA: Error (throttled/unavailable)
+
+    Note over SA: fail_open = true<br/>Return None for sentiment
+
+    SA->>CW: Log error (warning)
+    SA-->>RV: {sentiment: null, explicit_escalation}
+
+    Note over RV: Continue without sentiment<br/>Escalation uses other factors
+```
+
 ### Response Blocked (PII Detected)
 
 ```mermaid
@@ -949,13 +1235,13 @@ sequenceDiagram
     RV->>CP: DetectPiiEntities
     CP-->>RV: {Entities: [{Type: "SSN", Score: 0.99}]}
 
-    Note over RV: Critical PII detected<br/>Action: BLOCK
+    Note over RV: Critical PII detected<br/>Action: BLOCK<br/>Skip sentiment/escalation
 
     RV->>CW: Log PII detection
     RV->>CW: Increment PIIDetected metric
     RV->>CW: Increment ValidationBlocked metric
 
-    RV-->>CO: {is_valid: false, action: "BLOCK",<br/>validated_response: <fallback>}
+    RV-->>CO: {is_valid: false, action: "BLOCK",<br/>validated_response: <fallback>,<br/>sentiment: null, escalation: null}
 
     Note over CO: Use fallback response<br/>Original never sent to customer
 ```
@@ -1060,6 +1346,13 @@ flowchart LR
 | ValidationLatency | Milliseconds | Validation processing time |
 | ComprehendCalls | Count | Comprehend API calls |
 | FallbackUsed | Count | Fallback response used |
+| SentimentAnalysisRequests | Count | Sentiment analysis calls |
+| Sentiment_POSITIVE | Count | Positive sentiment detected |
+| Sentiment_NEGATIVE | Count | Negative sentiment detected |
+| Sentiment_NEUTRAL | Count | Neutral sentiment detected |
+| Sentiment_MIXED | Count | Mixed sentiment detected |
+| EscalationTriggered | Count | Escalation threshold exceeded |
+| EscalationReason_* | Count | Escalation by primary reason |
 
 ---
 
@@ -1071,4 +1364,5 @@ flowchart LR
 - [ADR-010: Knowledge Base RAG](../adr/ADR-010-knowledge-base-rag.md) — RAG architecture
 - [ADR-011: Orchestrator Pattern](../adr/ADR-011-orchestrator-pattern.md) — Orchestration design
 - [ADR-012: Response Validation Strategy](../adr/ADR-012-response-validation.md) — Validation design
+- [ADR-013: Sentiment Analysis & Escalation](../adr/ADR-013-sentiment-escalation.md) — Sentiment & escalation design
 - [Build & Deploy Architecture](../build-deploy-architecture.md) — Deployment flows

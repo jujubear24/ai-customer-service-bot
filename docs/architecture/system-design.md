@@ -1,14 +1,14 @@
 # System Design
 
-**Last Updated:** December 27th, 2025
-**Status:** Phase 3.1 Complete
+**Last Updated:** December 28, 2025
+**Status:** Phase 3.2 Complete
 
 ---
 
 ## Overview
 
 The AI Customer Service Bot is a serverless, event-driven platform that provides intelligent customer support through natural language processing and AI-powered responses
-using Amazon Bedrock and RAG (Retrieval-Augmented Generation), with comprehensive response validation for safety and compliance.
+using Amazon Bedrock and RAG (Retrieval-Augmented Generation), with comprehensive response validation including sentiment analysis and escalation scoring for safety and compliance.
 
 ---
 
@@ -25,7 +25,7 @@ using Amazon Bedrock and RAG (Retrieval-Augmented Generation), with comprehensiv
 
 ---
 
-## Current Architecture (Phase 3.1)
+## Current Architecture (Phase 3.2)
 
 ### High-Level View
 
@@ -55,7 +55,7 @@ flowchart TB
         subgraph AI/ML Layer
             KB[Bedrock Knowledge Base]
             BEDROCK[Amazon Bedrock<br/>Claude Haiku 4.5]
-            COMPREHEND[Amazon Comprehend<br/>PII Detection]
+            COMPREHEND[Amazon Comprehend<br/>PII + Sentiment]
         end
 
         subgraph Data Layer
@@ -86,6 +86,7 @@ flowchart TB
     KB -->|documents| S3
     BH -->|converse| BEDROCK
     RV -->|detect PII| COMPREHEND
+    RV -->|detect sentiment| COMPREHEND
     CB -->|Query/Put| DDB
     IC -.->|uses| LAYER
     CB -.->|uses| LAYER
@@ -137,15 +138,17 @@ sequenceDiagram
     BR-->>BH: AI Response + token usage
     BH-->>CO: {response_text, model_id, tokens}
 
-    Note over CO: Validate response before returning
+    Note over CO: Validate response with<br/>sentiment & escalation
 
-    CO->>RV: Invoke (sync)<br/>{"response_text": "...", "user_message": "..."}
-    RV->>CP: Detect PII Entities
+    CO->>RV: Invoke (sync)<br/>{"response_text": "...", "user_message": "...",<br/>"intent": "...", "urgency": "..."}
+    RV->>CP: Detect PII (response)
     CP-->>RV: PII detections
-    Note over RV: Run business rules<br/>(profanity, length, disclaimers)
-    RV-->>CO: {validated_response, action, metadata}
+    RV->>CP: Detect Sentiment (user message)
+    CP-->>RV: Sentiment scores
+    Note over RV: Run business rules<br/>Calculate escalation score
+    RV-->>CO: {validated_response, action,<br/>sentiment, escalation, metadata}
 
-    Note over CO: Assemble final response
+    Note over CO: Assemble final response<br/>with sentiment & escalation data
 
     CO-->>AG: ChatResponse
     AG-->>C: HTTP 200 + JSON body
@@ -180,7 +183,9 @@ flowchart LR
         RV_IN[Response] --> RV_PII[PII Detection]
         RV_PII --> RV_RULES[Business Rules]
         RV_RULES --> RV_LENGTH[Length Check]
-        RV_LENGTH --> RV_ACTION[Determine Action]
+        RV_LENGTH --> RV_SENT[Sentiment Analysis]
+        RV_SENT --> RV_ESC[Escalation Scoring]
+        RV_ESC --> RV_ACTION[Determine Action]
         RV_ACTION --> RV_OUT[Validated Response]
     end
 
@@ -225,7 +230,7 @@ sequenceDiagram
 ### Overview
 
 The Response Validator is a Lambda function that validates all AI-generated responses before delivery to customers.
-It acts as a safety guardrail ensuring responses meet quality, safety, and compliance requirements.
+It acts as a safety guardrail ensuring responses meet quality, safety, and compliance requirements, while also analyzing customer sentiment and calculating escalation scores.
 
 ### Position in Architecture
 
@@ -239,12 +244,13 @@ It acts as a safety guardrail ensuring responses meet quality, safety, and compl
 │   │  Retriever  │    │   Handler   │    │    Validator     │               │
 │   └─────────────┘    └─────────────┘    └──────────────────┘               │
 │                                                │                            │
-│                                         ┌──────┴──────┐                     │
-│                                         ▼             ▼                     │
-│                                   ┌─────────┐   ┌──────────┐               │
-│                                   │ Amazon  │   │ Business │               │
-│                                   │Comprehend│   │  Rules   │               │
-│                                   └─────────┘   └──────────┘               │
+│                               ┌────────────────┼────────────────┐           │
+│                               ▼                ▼                ▼           │
+│                         ┌─────────┐      ┌──────────┐    ┌───────────┐     │
+│                         │ Amazon  │      │ Business │    │ Escalation│     │
+│                         │Comprehend│      │  Rules   │    │  Scorer   │     │
+│                         │PII+Sent │      └──────────┘    └───────────┘     │
+│                         └─────────┘                                         │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -259,6 +265,8 @@ The validator runs checks in priority order:
 | P10 | Length | BLOCK (too short) or MODIFY (truncate) |
 | P20 | Topic Restrictions | MODIFY (add disclaimer) |
 | P30 | PII Detection | BLOCK (SSN/CC) or WARN (other) |
+| P40 | Sentiment Analysis | Analyze (never blocks) |
+| P50 | Escalation Scoring | Calculate (never blocks) |
 
 ### PII Detection Strategy
 
@@ -276,6 +284,46 @@ The validator runs checks in priority order:
 | Phone | REDACT | Moderate - mask in logs |
 | Name | WARN | Low risk - log only |
 | Order ID | ALLOW | Business identifier |
+
+### Sentiment Analysis
+
+Sentiment analysis is performed on the **user message** (not the AI response) using Amazon Comprehend.
+
+**Features:**
+
+- Detects POSITIVE, NEGATIVE, NEUTRAL, or MIXED sentiment
+- Returns confidence scores for each sentiment type
+- Detects explicit escalation phrases via regex patterns
+- Fail-open design: returns None on errors
+
+**Explicit Escalation Patterns:**
+
+- "speak/talk to human/agent/person"
+- "transfer/connect/escalate to support"
+- "this isn't helping/working"
+- "useless/stupid bot"
+
+### Escalation Scoring
+
+A weighted 5-factor algorithm calculates when conversations should be escalated to human agents.
+
+**Factors and Weights:**
+
+| Factor | Weight | Description | Scoring |
+| -------- | -------- | ------------- | --------- |
+| Explicit Intent | 0.35 | User explicitly requests human | 1.0 if detected, else 0.0 |
+| Negative Sentiment | 0.25 | Comprehend negative score | Direct score (0.0-1.0) |
+| Urgency | 0.20 | From intent classifier | high=1.0, medium=0.5, low=0.0 |
+| Repeated Question | 0.15 | Same intent asked multiple times | 2+ repeats=1.0, 1=0.5, 0=0.0 |
+| Low Confidence | 0.05 | Intent classifier confidence | (1.0 - conf) if < 0.70 |
+
+**Threshold:** Score ≥ 0.70 triggers escalation recommendation.
+
+**Factory Configurations:**
+
+- `create_default_scorer()` — threshold: 0.70
+- `create_sensitive_scorer()` — threshold: 0.50 (more escalations)
+- `create_conservative_scorer()` — threshold: 0.85 (fewer escalations)
 
 ### Validation Actions
 
@@ -410,14 +458,18 @@ stateDiagram-v2
 
     ValidateResponse --> CheckSafety
 
-    CheckSafety --> SaveAndRespond: safe
+    CheckSafety --> CheckEscalationScore: safe
     CheckSafety --> FallbackResponse: unsafe
 
-    RouteToAgent --> NotifyAgent
-    NotifyAgent --> SaveAndRespond
+    CheckEscalationScore --> SaveResponse: no escalation
+    CheckEscalationScore --> RouteToAgent: needs_escalation
 
-    FallbackResponse --> SaveAndRespond
-    SaveAndRespond --> [*]
+    RouteToAgent --> NotifyAgent
+    NotifyAgent --> SaveResponse
+
+    FallbackResponse --> SaveResponse
+    SaveResponse --> SendResponse
+    SendResponse --> [*]
 ```
 
 ---
@@ -440,18 +492,21 @@ stateDiagram-v2
 - Filter profanity and inappropriate language
 - Enforce response length constraints
 - Add disclaimers for medical/legal/financial content
-- Calculate escalation scores
-- Return validated/modified responses
+- Analyze user message sentiment via Comprehend
+- Calculate escalation scores using 5-factor algorithm
+- Return validated/modified responses with sentiment and escalation data
 
 **Sub-Components:**
 
 ```bash
 response-validator/
-├── handler.py          # Lambda entry point, error handling
-├── service.py          # Orchestration layer, fail-open logic
-├── pii_detector.py     # PII detection (Comprehend + regex)
-├── rules.py            # Business rules engine
-└── models.py           # Pydantic request/response models
+├── handler.py           # Lambda entry point, error handling
+├── service.py           # Orchestration layer, fail-open logic
+├── pii_detector.py      # PII detection (Comprehend + regex)
+├── sentiment_analyzer.py # Sentiment analysis + explicit escalation
+├── escalation.py        # 5-factor escalation scoring engine
+├── rules.py             # Business rules engine
+└── models.py            # Pydantic request/response models
 ```
 
 **Configuration:**
@@ -462,6 +517,9 @@ response-validator/
 | `ENABLE_PROFANITY_CHECK` | `true` | Enable profanity filtering |
 | `ENABLE_BUSINESS_RULES` | `true` | Enable topic restriction rules |
 | `ENABLE_LENGTH_CHECK` | `true` | Enable length validation |
+| `ENABLE_SENTIMENT_ANALYSIS` | `true` | Enable sentiment analysis via Comprehend |
+| `ENABLE_ESCALATION_SCORING` | `true` | Enable escalation score calculation |
+| `ESCALATION_THRESHOLD` | `0.70` | Score threshold to trigger escalation |
 | `MIN_RESPONSE_LENGTH` | `20` | Minimum response length (chars) |
 | `MAX_RESPONSE_LENGTH` | `2000` | Maximum response length (chars) |
 | `TRUNCATE_LONG_RESPONSES` | `true` | Auto-truncate long responses |
@@ -471,10 +529,10 @@ response-validator/
 
 | Metric | Target | Notes |
 | -------- | -------- | ------- |
-| P50 Latency | < 200ms | Without Comprehend |
-| P99 Latency | < 800ms | With Comprehend call |
+| P50 Latency | < 250ms | With sentiment analysis |
+| P99 Latency | < 800ms | With all Comprehend calls |
 | Cold Start | < 2s | With provisioned concurrency |
-| Memory | < 256MB | Typical usage |
+| Memory | < 300MB | Typical usage |
 
 ### Chat Orchestrator Lambda
 
@@ -491,12 +549,14 @@ response-validator/
 - Coordinate chat flow between RAG, Bedrock, and Validator
 - Generate conversation IDs when not provided
 - Aggregate latency metrics (RAG, Bedrock, validation, total)
+- Pass intent, urgency, and previous_intents to Validator
+- Return sentiment and escalation data in response metadata
 - Handle errors from downstream services
-- Return unified response format with validation metadata
+- Return unified response format with all metadata
 
 **Endpoints:**
 
-- `POST /chat` — Full chat flow with RAG-enhanced, validated AI responses
+- `POST /chat` — Full chat flow with RAG-enhanced, validated AI responses including sentiment and escalation data
 
 ### RAG Retriever Lambda
 
@@ -581,6 +641,7 @@ response-validator/
 - Classify customer messages into intent categories
 - Extract entities (order IDs, products, sentiment)
 - Calculate confidence scores
+- Determine urgency level
 - Flag messages requiring escalation
 
 **Intent Types:**
@@ -671,7 +732,7 @@ flowchart TB
 
         subgraph AI Services
             BEDROCK[Bedrock<br/>Least-privilege IAM]
-            COMPREHEND[Comprehend<br/>PII Detection only]
+            COMPREHEND[Comprehend<br/>PII + Sentiment only]
         end
 
         subgraph Secrets
@@ -703,10 +764,12 @@ flowchart TB
 | API | Throttling | ✅ Enabled (100/50) |
 | API | Authentication | 📋 Planned (Cognito) |
 | Compute | Least-privilege IAM | ✅ Enabled |
-| AI | Comprehend PII only | ✅ Enabled |
+| AI | Comprehend PII + Sentiment only | ✅ Enabled |
 | Response | PII detection & blocking | ✅ Enabled |
 | Response | Profanity filtering | ✅ Enabled |
 | Response | Content safety rules | ✅ Enabled |
+| Response | Sentiment analysis | ✅ Enabled |
+| Response | Escalation scoring | ✅ Enabled |
 | Data | DynamoDB encryption at rest | ✅ Enabled (KMS) |
 | Data | Aurora encryption at rest | ✅ Enabled (KMS) |
 | Data | S3 encryption | ✅ Enabled (SSE-S3) |
@@ -789,6 +852,13 @@ flowchart LR
 | ValidationLatency | Response Validator | Processing time |
 | ComprehendCalls | Response Validator | Comprehend API calls |
 | FallbackUsed | Response Validator | Fallback activations |
+| SentimentAnalysisRequests | Response Validator | Sentiment calls |
+| Sentiment_POSITIVE | Response Validator | Positive sentiment count |
+| Sentiment_NEGATIVE | Response Validator | Negative sentiment count |
+| Sentiment_NEUTRAL | Response Validator | Neutral sentiment count |
+| Sentiment_MIXED | Response Validator | Mixed sentiment count |
+| EscalationTriggered | Response Validator | Escalations triggered |
+| EscalationReason_* | Response Validator | Escalations by reason |
 
 ### Alarms
 
@@ -801,6 +871,7 @@ flowchart LR
 | Bedrock Throttling | > 0 in 5 min | Medium |
 | Validation Block Rate | > 10% in 15 min | Medium |
 | PII Detection Spike | > 50 in 5 min | High |
+| Escalation Rate | > 20% in 15 min | Medium |
 
 ---
 
@@ -841,3 +912,4 @@ flowchart LR
 - [ADR-010: Knowledge Base RAG](../adr/ADR-010-knowledge-base-rag.md)
 - [ADR-011: Orchestrator Pattern](../adr/ADR-011-orchestrator-pattern.md)
 - [ADR-012: Response Validation Strategy](../adr/ADR-012-response-validation.md)
+- [ADR-013: Sentiment Analysis & Escalation](../adr/ADR-013-sentiment-escalation.md)
