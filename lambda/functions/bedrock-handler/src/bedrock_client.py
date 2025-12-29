@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError
 from tenacity import (
     before_sleep_log,
     retry,

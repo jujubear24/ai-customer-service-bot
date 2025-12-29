@@ -1,4 +1,4 @@
-[project]
+ [project]
 name = "escalation-router"
 version = "0.1.0"
 description = "Lambda function for escalation-router"
@@ -17,10 +17,12 @@ dev = [
     "moto[all]>=5.0.0",
     "mypy>=1.8.0",
     "ruff>=0.8.4",
+    "boto3-stubs[dynamodb,sns,sqs]>=1.35.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -42,8 +44,9 @@ exclude_lines = [
 ]
 
 [tool.mypy]
-mypy_path = "../../layers/common/python"
+mypy_path = ["src", "../../layers/common/python"]
 python_version = "3.12"
+explicit_package_bases = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -54,6 +57,17 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "aws_lambda_powertools.*",
+    "mypy_boto3_dynamodb",
+    "mypy_boto3_sns",
+    "mypy_boto3_sqs",
+    "boto3",
+    "botocore",
+]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
@@ -74,4 +88,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "shared"]
+known-first-party = ["src", "shared", "models", "service", "handler"]

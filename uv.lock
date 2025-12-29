@@ -191,6 +191,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "boto3-stubs", extra = ["bedrock-runtime"] },
     { name = "moto", extra = ["all"] },
     { name = "mypy" },
     { name = "pytest" },
@@ -203,6 +204,7 @@ dev = [
 requires-dist = [
     { name = "aws-lambda-powertools", extras = ["tracer"], specifier = ">=2.31.0" },
     { name = "boto3", specifier = ">=1.35.0" },
+    { name = "boto3-stubs", extras = ["bedrock-runtime"], marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "moto", extras = ["all"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
@@ -285,6 +287,12 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+bedrock-runtime = [
+    { name = "mypy-boto3-bedrock-runtime" },
+]
+dynamodb = [
+    { name = "mypy-boto3-dynamodb" },
+]
 essential = [
     { name = "mypy-boto3-cloudformation" },
     { name = "mypy-boto3-dynamodb" },
@@ -292,6 +300,12 @@ essential = [
     { name = "mypy-boto3-lambda" },
     { name = "mypy-boto3-rds" },
     { name = "mypy-boto3-s3" },
+    { name = "mypy-boto3-sqs" },
+]
+sns = [
+    { name = "mypy-boto3-sns" },
+]
+sqs = [
     { name = "mypy-boto3-sqs" },
 ]
 
@@ -551,6 +565,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "boto3-stubs", extra = ["bedrock-runtime"] },
     { name = "moto", extra = ["all"] },
     { name = "mypy" },
     { name = "pytest" },
@@ -563,6 +578,7 @@ dev = [
 requires-dist = [
     { name = "aws-lambda-powertools", extras = ["tracer"], specifier = ">=2.31.0" },
     { name = "boto3", specifier = ">=1.35.0" },
+    { name = "boto3-stubs", extras = ["bedrock-runtime"], marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "moto", extras = ["all"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
@@ -747,6 +763,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "boto3-stubs", extra = ["dynamodb", "sns", "sqs"] },
     { name = "moto", extra = ["all"] },
     { name = "mypy" },
     { name = "pytest" },
@@ -759,6 +776,7 @@ dev = [
 requires-dist = [
     { name = "aws-lambda-powertools", extras = ["tracer"], specifier = ">=2.31.0" },
     { name = "boto3", specifier = ">=1.35.0" },
+    { name = "boto3-stubs", extras = ["dynamodb", "sns", "sqs"], marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "moto", extras = ["all"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
@@ -1508,6 +1526,15 @@ wheels = [
 ]
 
 [[package]]
+name = "mypy-boto3-bedrock-runtime"
+version = "1.40.76"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/db/cc668a48a27973df31c7044a6785bd0e8691b1a0419dae001c4c29f1c98f/mypy_boto3_bedrock_runtime-1.40.76.tar.gz", hash = "sha256:52f2a2b3955eb9f4f0d075398f2d430abcc6bf56ff00815b94e3371e66030059", size = 28428 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/6f/8b04729224a76952e08406eccbbbebfa75ee7df91313279d76428f13fdc2/mypy_boto3_bedrock_runtime-1.40.76-py3-none-any.whl", hash = "sha256:0347f6d78e342d640da74bbd6158b276c5cb39ef73405084a65fe490766b6dab", size = 34454 },
+]
+
+[[package]]
 name = "mypy-boto3-cloudformation"
 version = "1.40.57"
 source = { registry = "https://pypi.org/simple" }
@@ -1559,6 +1586,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a8/1e/27cebe8c95fa9899f4e4ee5f4d3d15fe946ca2dfac43470bc427069f30c4/mypy_boto3_s3-1.40.61.tar.gz", hash = "sha256:2655db143cae37fbc68b53aae34fbc5c904925d04b0f263ae7c38fb560b6a85f", size = 76037 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/91/46/f10a3266c1676d385afdbb2588875d5128b6c69ae46a1c1ee75540271ebd/mypy_boto3_s3-1.40.61-py3-none-any.whl", hash = "sha256:51666977f81b6f7a88fe22eaf041b755a2873d0225e481ad5241bb28e6f6bd47", size = 82826 },
+]
+
+[[package]]
+name = "mypy-boto3-sns"
+version = "1.40.57"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/e9/14aada4ddcbdc98dcf6a56b31f9ce3d91aa536e73f368c79d2a0286a53c6/mypy_boto3_sns-1.40.57.tar.gz", hash = "sha256:3be481d27b67684cc6507abf189004f2d08f2dc21a4dcb96209f39d2bbf4573f", size = 33279 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f2/c4/6cf5ce042c5975c4944bab3a8a1c1ee245bf795b7f2c6dd36552eacfafd7/mypy_boto3_sns-1.40.57-py3-none-any.whl", hash = "sha256:65c5559a321b3c959bc8cd0a827fd89660f6a150a18880ebc8a0ff736f4c97af", size = 40221 },
 ]
 
 [[package]]

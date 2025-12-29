@@ -17,6 +17,7 @@ dev = [
     "moto[all]>=5.0.0",
     "mypy>=1.8.0",
     "ruff>=0.8.4",
+    "boto3-stubs[bedrock-runtime]>=1.35.0",
 ]
 
 [tool.pytest.ini_options]
@@ -55,6 +56,15 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "aws_lambda_powertools.*",
+    "boto3",
+    "botocore",
+]
+ignore_missing_imports = true
+
 
 [tool.ruff]
 line-length = 100
