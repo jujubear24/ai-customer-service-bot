@@ -21,6 +21,11 @@ output "context_builder_function_name" {
   value       = module.lambda.context_builder_function_name
 }
 
+output "escalation_router_function_name" {
+  description = "Name of the escalation router Lambda function"
+  value       = module.lambda.escalation_router_function_name
+}
+
 # ==============================================================================
 # API Gateway Outputs
 # ==============================================================================
@@ -96,4 +101,28 @@ output "data_source_id" {
 output "aurora_cluster_endpoint" {
   description = "Aurora PostgreSQL cluster endpoint"
   value       = module.knowledge_base.aurora_cluster_endpoint
+}
+
+# =============================================================================
+# Escalation Outputs
+# =============================================================================
+
+output "escalation_queue_url" {
+  description = "URL of the escalation SQS FIFO queue"
+  value       = module.escalation.queue_url
+}
+
+output "escalation_queue_arn" {
+  description = "ARN of the escalation SQS FIFO queue"
+  value       = module.escalation.queue_arn
+}
+
+output "escalation_dlq_url" {
+  description = "URL of the escalation dead letter queue"
+  value       = module.escalation.dlq_url
+}
+
+output "escalation_sns_topic_arn" {
+  description = "ARN of the escalation SNS topic (if enabled)"
+  value       = module.escalation.sns_topic_arn
 }

@@ -121,3 +121,18 @@ output "response_validator_invoke_arn" {
   description = "Response Validator function invoke ARN"
   value       = try(aws_lambda_function.this["response-validator"].invoke_arn, null)
 }
+
+output "escalation_router_function_name" {
+  description = "Escalation Router function name"
+  value       = try(aws_lambda_function.this["escalation-router"].function_name, null)
+}
+
+output "escalation_router_function_arn" {
+  description = "Escalation Router function ARN"
+  value       = try(aws_lambda_function.this["escalation-router"].arn, null)
+}
+
+output "escalation_router_invoke_arn" {
+  description = "Escalation Router function invoke ARN"
+  value       = try(aws_lambda_function.this["escalation-router"].invoke_arn, null)
+}

@@ -12,6 +12,7 @@ locals {
   rag_function_name                = "${var.project_name}-rag-retriever-${var.environment}"
   bedrock_function_name            = "${var.project_name}-bedrock-handler-${var.environment}"
   response_validator_function_name = "${var.project_name}-response-validator-${var.environment}"
+  escalation_router_function_name  = "${var.project_name}-escalation-router-${var.environment}"
 }
 
 # ==============================================================================
@@ -78,6 +79,26 @@ module "lambda_layer" {
 
   # No functions in this module instance
   functions = {}
+}
+
+# ==============================================================================
+# Escalation Module
+# ==============================================================================
+
+module "escalation" {
+  source = "../../modules/escalation"
+
+  project_name       = var.project_name
+  environment        = var.environment
+  dynamodb_table_arn = module.dynamodb.table_arn
+
+  # Optional: Enable SNS notifications for real-time alerts
+  enable_sns_notifications = false
+
+  # Optional: Enable CloudWatch alarms (enable in prod)
+  enable_alarms = false
+
+  tags = local.common_tags
 }
 
 # ==============================================================================
@@ -166,6 +187,7 @@ module "lambda" {
         RAG_FUNCTION_NAME                = local.rag_function_name
         BEDROCK_FUNCTION_NAME            = local.bedrock_function_name
         RESPONSE_VALIDATOR_FUNCTION_NAME = local.response_validator_function_name
+        ESCALATION_ROUTER_FUNCTION_NAME  = local.escalation_router_function_name
       }
       enable_xray                  = true
       additional_layers            = [module.lambda_layer.layer_arn]
@@ -179,17 +201,20 @@ module "lambda" {
       timeout     = 30
       memory_size = 512
       environment_variables = {
-        ENABLE_PII_DETECTION     = "true"
-        ENABLE_PROFANITY_CHECK   = "true"
-        ENABLE_BUSINESS_RULES    = "true"
-        ENABLE_LENGTH_CHECK      = "true"
-        MIN_RESPONSE_LENGTH      = "20"
-        MAX_RESPONSE_LENGTH      = "2000"
-        TRUNCATE_LONG_RESPONSES  = "true"
-        STOP_ON_CRITICAL_FAILURE = "true"
-        USE_FALLBACK_ON_BLOCK    = "true"
-        REDACT_PII_IN_RESPONSE   = "true"
-        FAIL_OPEN_ON_ERROR       = "false"
+        ENABLE_PII_DETECTION      = "true"
+        ENABLE_PROFANITY_CHECK    = "true"
+        ENABLE_BUSINESS_RULES     = "true"
+        ENABLE_LENGTH_CHECK       = "true"
+        MIN_RESPONSE_LENGTH       = "20"
+        MAX_RESPONSE_LENGTH       = "2000"
+        TRUNCATE_LONG_RESPONSES   = "true"
+        STOP_ON_CRITICAL_FAILURE  = "true"
+        USE_FALLBACK_ON_BLOCK     = "true"
+        REDACT_PII_IN_RESPONSE    = "true"
+        FAIL_OPEN_ON_ERROR        = "false"
+        ENABLE_SENTIMENT_ANALYSIS = "true"
+        ENABLE_ESCALATION_SCORING = "true"
+        ESCALATION_THRESHOLD      = "0.70"
       }
       enable_xray                  = true
       additional_layers            = [module.lambda_layer.layer_arn]
@@ -197,6 +222,27 @@ module "lambda" {
       additional_policy_statements = []
     }
 
+    escalation-router = {
+      handler     = "handler.handler"
+      runtime     = "python3.12"
+      timeout     = 10
+      memory_size = 256
+      environment_variables = {
+        ESCALATION_QUEUE_URL     = module.escalation.queue_url
+        DYNAMODB_TABLE_NAME      = module.dynamodb.table_name
+        ENABLE_QUEUE             = "true"
+        ENABLE_DYNAMODB_UPDATE   = "true"
+        ENABLE_SNS_NOTIFICATIONS = "false"
+        ESCALATION_SNS_TOPIC_ARN = ""
+        CRITICAL_THRESHOLD       = "0.90"
+        HIGH_THRESHOLD           = "0.80"
+        FAIL_OPEN_ON_ERROR       = "false"
+      }
+      enable_xray                  = true
+      additional_layers            = [module.lambda_layer.layer_arn]
+      additional_policy_arns       = [module.escalation.iam_policy_arn]
+      additional_policy_statements = []
+    }
   }
 }
 
@@ -206,7 +252,7 @@ module "lambda" {
 
 resource "aws_iam_policy" "response_validator_comprehend_policy" {
   name        = "${var.project_name}-${var.environment}-response-validator-comprehend"
-  description = "Allow Response Validator to use Amazon Comprehend for PII detection"
+  description = "Allow Response Validator to use Amazon Comprehend for PII detection and sentiment analysis"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -237,7 +283,7 @@ resource "aws_iam_role_policy_attachment" "response_validator_comprehend_attachm
 
 resource "aws_iam_policy" "orchestrator_invoke_policy" {
   name        = "${var.project_name}-${var.environment}-orchestrator-invoke-policy"
-  description = "Allow Chat Orchestrator to invoke RAG and Bedrock Lambdas"
+  description = "Allow Chat Orchestrator to invoke RAG, Bedrock, Validator, and Escalation Lambdas"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -248,7 +294,8 @@ resource "aws_iam_policy" "orchestrator_invoke_policy" {
         Resource = [
           module.lambda.function_arns["rag-retriever"],
           module.lambda.function_arns["bedrock-handler"],
-          module.lambda.function_arns["response-validator"]
+          module.lambda.function_arns["response-validator"],
+          module.lambda.function_arns["escalation-router"]
         ]
       }
     ]
@@ -305,6 +352,7 @@ module "observability" {
     module.lambda.rag_retriever_function_name,
     module.lambda.chat_orchestrator_function_name,
     module.lambda.response_validator_function_name,
+    module.lambda.escalation_router_function_name,
   ]
 
   log_retention_days = 7
