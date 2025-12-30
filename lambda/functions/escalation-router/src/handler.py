@@ -156,6 +156,31 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
             },
         )
 
+    except KeyError as e:
+        logger.error(f"Missing required field: {e}")
+        metrics.add_metric(name="ValidationErrors", unit="Count", value=1)
+        return _build_response(
+            status_code=400,
+            body={
+                "success": False,
+                "error": f"Missing required field: {e}",
+                "message": f"Request is missing required field: {e}",
+            },
+        )
+
+    except (ValueError, TypeError) as e:
+        # Catch JSON decode errors and type mismatches
+        logger.error(f"Invalid request data: {e}")
+        metrics.add_metric(name="ValidationErrors", unit="Count", value=1)
+        return _build_response(
+            status_code=400,
+            body={
+                "success": False,
+                "error": "Invalid request data",
+                "message": str(e),
+            },
+        )
+
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
         metrics.add_metric(name="UnexpectedErrors", unit="Count", value=1)
@@ -195,6 +220,7 @@ def _parse_request(event: dict[str, Any]) -> EscalationRequest:
 
     Raises:
         ValidationError: If event doesn't match expected schema.
+        KeyError: If required field is missing.
     """
     # Handle both direct invocation and API Gateway formats
     body = event.get("body", event)
@@ -202,6 +228,10 @@ def _parse_request(event: dict[str, Any]) -> EscalationRequest:
         import json
 
         body = json.loads(body)
+
+    # Validate required fields exist
+    if "escalation" not in body:
+        raise KeyError("escalation")
 
     # Build escalation factors
     factors_data = body.get("escalation", {}).get("factors", {})
