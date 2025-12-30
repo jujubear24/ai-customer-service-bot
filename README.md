@@ -41,7 +41,7 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 | S3 Document Store | ✅ Deployed | FAQ and documentation storage for RAG |
 | POST /chat Endpoint | ✅ Deployed | Unified chat API with RAG-enhanced responses |
 
-### Phase 3: Response Validation & Sentiment ✅
+### Phase 3: Response Validation & Escalation ✅
 
 | Component | Status | Description |
 | ----------- | -------- | ------------- |
@@ -49,7 +49,7 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 | Chat Orchestrator Integration | ✅ Deployed | Validation step added to orchestration flow |
 | Sentiment Analyzer | ✅ Deployed | Amazon Comprehend integration for sentiment scoring |
 | Escalation Scoring | ✅ Deployed | Weighted 5-factor escalation algorithm |
-| Escalation Router | 📋 Planned | Priority-based routing to human agents |
+| Escalation Router Lambda | ✅ Deployed | Priority-based routing to human agents via SQS FIFO |
 
 ### Future Phases 📋
 
@@ -73,20 +73,21 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
 └──────┬──────┘
        │ POST /chat
        ▼
-┌──────────────────────────────────────────────────────┐
-│              API Gateway (REST)                      │
-│     • Request validation (JSON Schema)               │
-│     • CORS enabled                                   │
-│     • X-Ray tracing                                  │
-└──────┬───────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                   API Gateway (REST)                         │
+│     • Request validation (JSON Schema)                       │
+│     • CORS enabled                                           │
+│     • X-Ray tracing                                          │
+└──────┬───────────────────────────────────────────────────────┘
        │
        ▼
-┌──────────────────────────────────────────────────────┐
-│            Chat Orchestrator Lambda                  │
-│     • Coordinates RAG + Bedrock + Validation flow    │
-│     • Generates conversation IDs                     │
-│     • Aggregates latency metrics                     │
-└──────┬───────────────────┬───────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                 Chat Orchestrator Lambda                      │
+│     • Coordinates RAG + Bedrock + Validation flow            │
+│     • Generates conversation IDs                             │
+│     • Aggregates latency metrics                             │
+│     • Triggers escalation routing when needed                │
+└──────┬───────────────────┬───────────────────────────────────┘
        │                   │
        ▼                   ▼
 ┌──────────────────┐  ┌──────────────────────────────┐
@@ -119,11 +120,28 @@ This project demonstrates advanced **cloud engineering** and **AI/ML integration
                     │  • Escalation scoring        │
                     └──────────────┬───────────────┘
                                    │
-                                   ▼
-                            ┌──────────────┐
-                            │   Customer   │
-                            │   Response   │
-                            └──────────────┘
+                    ┌──────────────┴───────────────┐
+                    │                              │
+            (needs_escalation?)                    │
+                    │                              │
+           ┌───────┴───────┐                       │
+           ▼               ▼                       ▼
+┌──────────────────┐  ┌──────────────┐    ┌──────────────┐
+│ Escalation Router│  │              │    │   Customer   │
+│     Lambda       │  │   (skip)     │    │   Response   │
+│  • Priority tier │  │              │    └──────────────┘
+│  • SQS FIFO queue│  └──────────────┘
+│  • Agent notify  │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│   SQS FIFO       │
+│  (Agent Queue)   │
+│  • CRITICAL tier │
+│  • HIGH tier     │
+│  • NORMAL tier   │
+└──────────────────┘
 
 Additional Endpoints:
 ┌─────────────┐
@@ -181,6 +199,42 @@ See [`docs/architecture/`](docs/architecture/) for detailed design documents.
 
 ## 🧩 Components
 
+### Escalation Router Lambda
+
+Routes escalated customer conversations to human agents based on priority scoring.
+
+- **Trigger:** Invoked by Chat Orchestrator when escalation threshold exceeded
+- **Features:**
+  - **Priority Routing:** CRITICAL (≥0.90), HIGH (0.80-0.89), NORMAL (0.70-0.79)
+  - **SQS FIFO Queue:** Reliable message delivery with deduplication
+  - **Customer Messages:** Priority-appropriate acknowledgment messages
+  - **Estimated Wait Times:** Dynamic wait time estimates by priority
+  - **DynamoDB Updates:** Conversation status set to ESCALATED
+  - **SNS Notifications:** Optional real-time agent alerts
+  - **Fail-Open Design:** Returns graceful response on errors
+- **Performance:** 256 MB memory, ~50-100ms execution time
+- **Test Coverage:** 100% (97 unit tests)
+
+**Priority Tiers:**
+
+| Priority | Score Range | Estimated Wait | Use Case |
+| -------- | ----------- | -------------- | -------- |
+| CRITICAL | ≥ 0.90 | < 2 minutes | Angry + explicit + urgent |
+| HIGH | 0.80 - 0.89 | < 5 minutes | Explicit request or very negative |
+| NORMAL | 0.70 - 0.79 | < 10 minutes | Moderate escalation signals |
+
+**Configuration:**
+
+| Variable | Default | Description |
+| ---------- | --------- | ------------- |
+| `ESCALATION_QUEUE_URL` | Required | SQS FIFO queue URL |
+| `ESCALATION_NOTIFICATION_TOPIC_ARN` | Optional | SNS topic for agent alerts |
+| `DYNAMODB_TABLE_NAME` | Required | Conversations table |
+| `CRITICAL_THRESHOLD` | `0.90` | Score for CRITICAL priority |
+| `HIGH_THRESHOLD` | `0.80` | Score for HIGH priority |
+
+See [ADR-014](docs/adr/ADR-014-escalation-router.md) for design decisions.
+
 ### Response Validator Lambda
 
 Validates all AI-generated responses before delivery to customers, ensuring safety and compliance.
@@ -234,15 +288,16 @@ See [ADR-012](docs/adr/ADR-012-response-validation.md) and [ADR-013](docs/adr/AD
 
 ### Chat Orchestrator Lambda
 
-Orchestrates the complete chat flow, coordinating RAG retrieval, AI response generation, and response validation.
+Orchestrates the complete chat flow, coordinating RAG retrieval, AI response generation, response validation, and escalation routing.
 
 - **Endpoint:** `POST /chat`
 - **Features:**
   - Invokes RAG Retriever for context retrieval
   - Invokes Bedrock Handler for response generation
   - Invokes Response Validator for safety checks
+  - Invokes Escalation Router when threshold exceeded
   - Auto-generates conversation IDs
-  - Aggregates latency metrics (RAG, Bedrock, validation, total)
+  - Aggregates latency metrics (RAG, Bedrock, validation, escalation, total)
   - Returns sentiment and escalation data in response metadata
   - Resilient with retry logic (tenacity)
   - Configurable validation (`validate_response` flag)
@@ -414,6 +469,14 @@ curl -X POST "$CHAT_URL" \
     "validate_response": false
   }'
 
+# Test escalation trigger
+curl -X POST "$CHAT_URL" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "This is unacceptable! I want to speak to a manager NOW!",
+    "tenant_id": "test-tenant"
+  }'
+
 # Test intent classification
 curl -X POST "$(cd terraform/environments/dev && terraform output -raw classify_intent_endpoint)" \
   -H "Content-Type: application/json" \
@@ -428,7 +491,7 @@ curl -X POST "$(cd terraform/environments/dev && terraform output -raw classify_
 ai-customer-service-bot/
 ├── .github/                    # GitHub Actions workflows
 ├── docs/
-│   ├── adr/                    # Architecture Decision Records (ADR-001 to ADR-013)
+│   ├── adr/                    # Architecture Decision Records (ADR-001 to ADR-014)
 │   ├── architecture/           # System design docs
 │   │   ├── data-flow.md
 │   │   └── system-design.md
@@ -442,7 +505,7 @@ ai-customer-service-bot/
 │   │   ├── bedrock-handler/    # ✅ AI response generation
 │   │   ├── chat-orchestrator/  # ✅ Chat flow orchestration
 │   │   ├── context-builder/    # ✅ Context retrieval Lambda
-│   │   ├── escalation-router/  # 📋 Escalation handling (planned)
+│   │   ├── escalation-router/  # ✅ Priority-based agent routing
 │   │   ├── intent-classifier/  # ✅ Intent classification Lambda
 │   │   ├── metrics-publisher/  # 📋 Custom metrics (planned)
 │   │   ├── rag-retriever/      # ✅ Knowledge Base retrieval
@@ -468,12 +531,16 @@ ai-customer-service-bot/
 │       ├── api_gateway/        # REST API configuration
 │       ├── bedrock/            # Bedrock IAM and config
 │       ├── dynamodb/           # DynamoDB table and GSIs
+│       ├── escalation/         # Escalation Router infrastructure
 │       ├── knowledge_base/     # Bedrock KB + Aurora PostgreSQL
 │       ├── lambda/             # Lambda function module
 │       ├── networking/         # VPC, subnets, security groups
 │       └── observability/      # CloudWatch, X-Ray, alarms
 ├── tests/
 │   ├── e2e/                    # End-to-end tests
+│   │   ├── test_escalation_router.py  # Escalation Router E2E tests
+│   │   ├── test_escalation_flow.py    # Full escalation flow tests
+│   │   └── ...
 │   ├── integration/            # Integration tests
 │   ├── load/                   # Load/performance tests
 │   └── unit/                   # Unit tests
@@ -495,6 +562,7 @@ cd lambda/functions/bedrock-handler && uv run pytest -v
 cd lambda/functions/rag-retriever && uv run pytest -v
 cd lambda/functions/chat-orchestrator && uv run pytest -v
 cd lambda/functions/response-validator && uv run pytest -v
+cd lambda/functions/escalation-router && uv run pytest -v
 
 # All tests with coverage
 make test-unit
@@ -506,6 +574,11 @@ python scripts/test_chat_orchestrator.py
 python scripts/test_response_validator.py
 python scripts/test_response_validator.py --quick  # Quick tests only
 python scripts/test_response_validator.py -v       # Verbose output
+
+# E2E test for escalation router
+python tests/e2e/test_escalation_router.py
+python tests/e2e/test_escalation_router.py --quick  # Quick smoke tests
+python tests/e2e/test_escalation_router.py -v       # Verbose output
 
 # Integration tests (when implemented)
 make test-integration
@@ -566,17 +639,22 @@ make local-stop
 | Sentiment_POSITIVE/NEGATIVE/NEUTRAL/MIXED | Response Validator | Sentiment distribution |
 | EscalationTriggered | Response Validator | Escalation events |
 | EscalationReason_* | Response Validator | Escalation by reason |
+| EscalationRouted | Escalation Router | Conversations routed to agents |
+| EscalationPriority_CRITICAL/HIGH/NORMAL | Escalation Router | Routing by priority tier |
+| EscalationQueueLatency | Escalation Router | Time to queue message |
+| EscalationNotificationSent | Escalation Router | SNS notifications sent |
 
 ---
 
 ## 🔒 Security
 
-- **Encryption:** Server-side encryption (SSE) for DynamoDB, S3, Aurora
+- **Encryption:** Server-side encryption (SSE) for DynamoDB, S3, Aurora, SQS
 - **IAM:** Least-privilege roles for all Lambda functions
 - **API Gateway:** Request validation, throttling (100 burst, 50 req/sec)
 - **VPC:** Aurora PostgreSQL in private subnets
 - **Secrets:** Environment variables via Terraform (Secrets Manager planned)
 - **Response Validation:** PII detection, profanity filtering, content safety checks
+- **SQS FIFO:** Message deduplication and ordering for escalations
 
 See [`docs/architecture/security.md`](docs/architecture/security.md) for detailed security documentation.
 
@@ -593,8 +671,9 @@ See [`docs/architecture/security.md`](docs/architecture/security.md) for detaile
 | Aurora Serverless v2 | $15-50 |
 | Bedrock (Claude Haiku) | $5-20 |
 | Comprehend (PII + Sentiment) | $2-10 |
+| SQS (FIFO) | <$1 |
 | S3 | <$1 |
-| **Total** | **~$27-95** |
+| **Total** | **~$28-98** |
 
 Costs scale with usage. Aurora Serverless v2 is the primary cost driver in dev.
 
@@ -617,6 +696,7 @@ Costs scale with usage. Aurora Serverless v2 is the primary cost driver in dev.
 | [ADR-011](docs/adr/ADR-011-orchestrator-pattern.md) | Orchestrator Pattern |
 | [ADR-012](docs/adr/ADR-012-response-validation.md) | Response Validation Strategy |
 | [ADR-013](docs/adr/ADR-013-sentiment-escalation.md) | Sentiment Analysis & Escalation |
+| [ADR-014](docs/adr/ADR-014-escalation-router.md) | Escalation Router Design |
 
 ---
 

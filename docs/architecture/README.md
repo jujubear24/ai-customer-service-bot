@@ -2,7 +2,7 @@
 
 This directory contains architecture documentation for the AI Customer Service Bot.
 
-**Status:** Phase 3.2 Complete (Sentiment Analysis & Escalation Scoring)
+**Status:** Phase 3.3 Complete (Escalation Router)
 
 ---
 
@@ -11,7 +11,7 @@ This directory contains architecture documentation for the AI Customer Service B
 | Document | Description |
 | ---------- | ------------- |
 | [System Design](./system-design.md) | High-level system architecture, component specifications, security, and observability |
-| [Data Flow](./data-flow.md) | Detailed data flow diagrams for chat, RAG retrieval, Bedrock, validation, sentiment, and escalation |
+| [Data Flow](./data-flow.md) | Detailed data flow diagrams for chat, RAG retrieval, Bedrock, validation, sentiment, escalation, and routing |
 | [Security](./security.md) | Security architecture, controls, encryption, IAM, and compliance |
 | [Build & Deploy Architecture](../build-deploy-architecture.md) | CI/CD pipeline, build process, and deployment workflow |
 
@@ -30,6 +30,7 @@ Key architectural decisions are documented in [ADRs](../adr/):
 | [ADR-011](../adr/ADR-011-orchestrator-pattern.md) | Orchestrator Pattern | Accepted |
 | [ADR-012](../adr/ADR-012-response-validation.md) | Response Validation Strategy | Accepted |
 | [ADR-013](../adr/ADR-013-sentiment-escalation.md) | Sentiment Analysis & Escalation Scoring | Accepted |
+| [ADR-014](../adr/ADR-014-escalation-router.md) | Escalation Router Design | Accepted |
 
 ---
 
@@ -54,7 +55,7 @@ mmdc -i system-design.md -o system-design.png
 
 ## Quick Reference
 
-### Current State (Phase 3.2)
+### Current State (Phase 3.3)
 
 ```bash
 Client → API Gateway → Chat Orchestrator
@@ -65,6 +66,13 @@ Client → API Gateway → Chat Orchestrator
                                     ├── Business Rules Engine
                                     ├── Sentiment Analyzer → Amazon Comprehend
                                     └── Escalation Scorer (5-factor algorithm)
+                                          │
+                                          ▼ (if needs_escalation)
+                                    Escalation Router
+                                          ├── Priority Classification (CRITICAL/HIGH/NORMAL)
+                                          ├── SQS FIFO Queue → Human Agents
+                                          ├── DynamoDB Status Update
+                                          └── SNS Notification (optional)
 
 Additional Endpoints:
 Client → API Gateway → Intent Classifier
@@ -92,7 +100,7 @@ Client → CloudFront → WAF → API Gateway → Step Functions
               ├── Sentiment Analysis → Amazon Comprehend
               └── Escalation Scoring
               ↓
-      Escalation Router → SQS (if escalation triggered)
+      Escalation Router → SQS FIFO (if escalation triggered)
               ↓
       Customer Response
 ```
@@ -105,7 +113,7 @@ Client → CloudFront → WAF → API Gateway → Step Functions
 
 | Component | Type | Purpose |
 | ----------- | ------ | --------- |
-| Chat Orchestrator | Lambda | Coordinates RAG → Bedrock → Validation chat flow |
+| Chat Orchestrator | Lambda | Coordinates RAG → Bedrock → Validation → Escalation flow |
 | RAG Retriever | Lambda | Queries Knowledge Base for relevant documents |
 | Bedrock Handler | Lambda | Generates AI responses via Claude Haiku 4.5 |
 | Knowledge Base | Bedrock KB | Manages document embeddings and retrieval |
@@ -118,19 +126,21 @@ Client → CloudFront → WAF → API Gateway → Step Functions
 ### Phase 3 Components (Deployed)
 
 | Component | Type | Purpose |
-|-----------|------|---------|
+| ----------- | ------ | --------- |
 | Response Validator | Lambda | Content safety, PII detection, business rules |
 | Sentiment Analyzer | Service | Amazon Comprehend sentiment analysis integration |
 | Escalation Scorer | Service | 5-factor weighted escalation algorithm |
+| Escalation Router | Lambda | Priority-based routing to human agents |
+| SQS FIFO Queue | Queue | Reliable escalation message delivery |
 
 ### Future Components (Planned)
 
 | Component | Type | Purpose |
 | ----------- | ------ | --------- |
-| Escalation Router | Lambda | Route to human agents when threshold exceeded |
 | Step Functions | Orchestration | Full workflow state machine |
 | ElastiCache Redis | Cache | Session caching and rate limiting |
 | DAX | Cache | DynamoDB acceleration |
+| Agent Dashboard | Web App | Human agent interface for escalations |
 
 ---
 
@@ -138,7 +148,7 @@ Client → CloudFront → WAF → API Gateway → Step Functions
 
 | Endpoint | Method | Lambda | Description |
 |----------|--------|--------|-------------|
-| `/chat`  | POST   | Chat Orchestrator    | RAG-enhanced AI chat with validation, sentiment, escalation |
+| `/chat`  | POST   | Chat Orchestrator | RAG-enhanced AI chat with validation, sentiment, escalation, routing |
 | `/classify-intent` | POST | Intent Classifier | Message intent classification |
 
 ---
@@ -170,7 +180,49 @@ The Response Validator performs multiple checks in priority order:
 | Repeated Question | 0.15 | Same intent asked 2+ times |
 | Low Confidence | 0.05 | Intent confidence < 0.70 |
 
-**Threshold:** Score ≥ 0.70 triggers escalation recommendation.
+**Threshold:** Score ≥ 0.70 triggers escalation routing.
+
+---
+
+## Escalation Router Pipeline
+
+When escalation is triggered, the Escalation Router handles routing to human agents:
+
+```bash
+┌─────────────────────────────────────────────────────────────────┐
+│                    Escalation Router Lambda                      │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Priority Classification                                      │
+│     • CRITICAL (≥0.90) → < 2 min wait                           │
+│     • HIGH (0.80-0.89) → < 5 min wait                           │
+│     • NORMAL (0.70-0.79) → < 10 min wait                        │
+│                                                                  │
+│  2. Queue Message (SQS FIFO)                                    │
+│     • Message group by priority tier                            │
+│     • Deduplication by escalation_id                            │
+│     • Full context for agent handoff                            │
+│                                                                  │
+│  3. Update DynamoDB                                             │
+│     • Set conversation status to ESCALATED                      │
+│     • Record escalation metadata                                │
+│                                                                  │
+│  4. Notify Agents (Optional)                                    │
+│     • SNS notification for CRITICAL/HIGH priority               │
+│     • Real-time alerts for urgent escalations                   │
+│                                                                  │
+│  5. Return Customer Message                                     │
+│     • Priority-appropriate acknowledgment                       │
+│     • Estimated wait time                                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Priority Tiers
+
+| Priority | Score Range | Wait Time | Message Group |
+|----------|-------------|-----------|---------------|
+| CRITICAL | ≥ 0.90 | < 2 minutes | priority-critical |
+| HIGH | 0.80 - 0.89 | < 5 minutes | priority-high |
+| NORMAL | 0.70 - 0.79 | < 10 minutes | priority-normal |
 
 ---
 
