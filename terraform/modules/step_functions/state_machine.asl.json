@@ -1,0 +1,435 @@
+{
+  "Comment": "AI Customer Service Bot - Chat Workflow (Express)",
+  "StartAt": "ReceiveMessage",
+  "States": {
+    "ReceiveMessage": {
+      "Type": "Pass",
+      "Comment": "Initialize workflow with request data and generate conversation_id if not provided",
+      "Parameters": {
+        "request.$": "$.body",
+        "request_id.$": "$$.Execution.Id",
+        "start_time.$": "$$.Execution.StartTime"
+      },
+      "Next": "ClassifyIntent"
+    },
+
+    "ClassifyIntent": {
+      "Type": "Task",
+      "Comment": "Classify user message intent and extract entities",
+      "Resource": "arn:aws:lambda:${region}:${account_id}:function:${project_name}-intent-classifier-${environment}",
+      "Parameters": {
+        "message.$": "$.request.message",
+        "tenant_id.$": "$.request.tenant_id",
+        "conversation_id.$": "$.request.conversation_id"
+      },
+      "ResultPath": "$.intent_result",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.intent_error",
+          "Next": "UseDefaultIntent"
+        }
+      ],
+      "Next": "ParallelContextAndRAG"
+    },
+
+    "UseDefaultIntent": {
+      "Type": "Pass",
+      "Comment": "Fallback to default intent on classification failure",
+      "Result": {
+        "intent": "question",
+        "confidence": 0.5,
+        "entities": [],
+        "urgency": "low",
+        "sentiment": "neutral",
+        "fallback": true
+      },
+      "ResultPath": "$.intent_result",
+      "Next": "ParallelContextAndRAG"
+    },
+
+    "ParallelContextAndRAG": {
+      "Type": "Parallel",
+      "Comment": "Execute Context Builder and RAG Retriever in parallel for latency optimization",
+      "Branches": [
+        {
+          "StartAt": "BuildContext",
+          "States": {
+            "BuildContext": {
+              "Type": "Task",
+              "Comment": "Retrieve conversation history from DynamoDB",
+              "Resource": "arn:aws:lambda:${region}:${account_id}:function:${project_name}-context-builder-${environment}",
+              "Parameters": {
+                "conversation_id.$": "$.request.conversation_id",
+                "tenant_id.$": "$.request.tenant_id",
+                "max_tokens": 4000
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.error",
+                  "Next": "EmptyContext"
+                }
+              ],
+              "End": true
+            },
+            "EmptyContext": {
+              "Type": "Pass",
+              "Comment": "Return empty context on failure (fail-open)",
+              "Result": {
+                "messages": [],
+                "token_count": 0,
+                "fallback": true
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "RetrieveRAG",
+          "States": {
+            "RetrieveRAG": {
+              "Type": "Task",
+              "Comment": "Retrieve relevant documents from Knowledge Base",
+              "Resource": "arn:aws:lambda:${region}:${account_id}:function:${project_name}-rag-retriever-${environment}",
+              "Parameters": {
+                "query.$": "$.request.message",
+                "tenant_id.$": "$.request.tenant_id",
+                "top_k": 3,
+                "min_score": 0.5
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.error",
+                  "Next": "EmptyRAG"
+                }
+              ],
+              "End": true
+            },
+            "EmptyRAG": {
+              "Type": "Pass",
+              "Comment": "Return empty RAG results on failure (fail-open)",
+              "Result": {
+                "documents": [],
+                "sources": [],
+                "fallback": true
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.parallel_results",
+      "Next": "MergeParallelResults"
+    },
+
+    "MergeParallelResults": {
+      "Type": "Pass",
+      "Comment": "Merge parallel branch results into a structured format",
+      "Parameters": {
+        "request.$": "$.request",
+        "request_id.$": "$.request_id",
+        "start_time.$": "$.start_time",
+        "intent_result.$": "$.intent_result",
+        "context.$": "$.parallel_results[0]",
+        "rag.$": "$.parallel_results[1]"
+      },
+      "Next": "GenerateResponse"
+    },
+
+    "GenerateResponse": {
+      "Type": "Task",
+      "Comment": "Generate AI response using Amazon Bedrock (Claude Haiku 4.5)",
+      "Resource": "arn:aws:lambda:${region}:${account_id}:function:${project_name}-bedrock-handler-${environment}",
+      "Parameters": {
+        "user_message.$": "$.request.message",
+        "tenant_id.$": "$.request.tenant_id",
+        "conversation_id.$": "$.request.conversation_id",
+        "intent.$": "$.intent_result.intent",
+        "rag_context.$": "$.rag.documents",
+        "conversation_history.$": "$.context.messages"
+      },
+      "ResultPath": "$.bedrock_result",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        },
+        {
+          "ErrorEquals": ["ThrottlingException", "ModelStreamErrorException"],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.5
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.bedrock_error",
+          "Next": "BedrockErrorResponse"
+        }
+      ],
+      "Next": "ValidateResponse"
+    },
+
+    "BedrockErrorResponse": {
+      "Type": "Pass",
+      "Comment": "Return error response when Bedrock fails",
+      "Parameters": {
+        "statusCode": 500,
+        "body": {
+          "error": "AI_SERVICE_UNAVAILABLE",
+          "message": "I apologize, but I'm temporarily unable to process your request. Please try again in a moment.",
+          "conversation_id.$": "$.request.conversation_id",
+          "retryable": true
+        }
+      },
+      "End": true
+    },
+
+    "ValidateResponse": {
+      "Type": "Task",
+      "Comment": "Validate AI response for safety, PII, sentiment analysis, and escalation scoring",
+      "Resource": "arn:aws:lambda:${region}:${account_id}:function:${project_name}-response-validator-${environment}",
+      "Parameters": {
+        "response_text.$": "$.bedrock_result.response_text",
+        "user_message.$": "$.request.message",
+        "conversation_id.$": "$.request.conversation_id",
+        "tenant_id.$": "$.request.tenant_id",
+        "intent.$": "$.intent_result.intent",
+        "intent_confidence.$": "$.intent_result.confidence",
+        "urgency.$": "$.intent_result.urgency",
+        "message_count.$": "$.context.message_count",
+        "options": {
+          "check_pii": true,
+          "check_profanity": true,
+          "check_business_rules": true,
+          "analyze_sentiment": true,
+          "calculate_escalation": true
+        }
+      },
+      "ResultPath": "$.validation_result",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.validation_error",
+          "Next": "SkipValidation"
+        }
+      ],
+      "Next": "CheckEscalation"
+    },
+
+    "SkipValidation": {
+      "Type": "Pass",
+      "Comment": "Skip validation on failure, use original response (fail-open)",
+      "Parameters": {
+        "request.$": "$.request",
+        "request_id.$": "$.request_id",
+        "start_time.$": "$.start_time",
+        "intent_result.$": "$.intent_result",
+        "context.$": "$.context",
+        "rag.$": "$.rag",
+        "bedrock_result.$": "$.bedrock_result",
+        "validation_result": {
+          "is_valid": true,
+          "validated_response.$": "$.bedrock_result.response_text",
+          "escalation": {
+            "needs_escalation": false,
+            "score": 0,
+            "fallback": true
+          },
+          "fallback": true
+        }
+      },
+      "Next": "CheckEscalation"
+    },
+
+    "CheckEscalation": {
+      "Type": "Choice",
+      "Comment": "Check if conversation needs escalation to human agent",
+      "Choices": [
+        {
+          "Variable": "$.validation_result.escalation.needs_escalation",
+          "BooleanEquals": true,
+          "Next": "RouteToAgent"
+        }
+      ],
+      "Default": "FormatSuccessResponse"
+    },
+
+    "RouteToAgent": {
+      "Type": "Task",
+      "Comment": "Route escalated conversation to human agent via SQS FIFO",
+      "Resource": "arn:aws:lambda:${region}:${account_id}:function:${project_name}-escalation-router-${environment}",
+      "Parameters": {
+        "conversation_id.$": "$.request.conversation_id",
+        "tenant_id.$": "$.request.tenant_id",
+        "user_id.$": "$.request.user_id",
+        "escalation.$": "$.validation_result.escalation",
+        "sentiment.$": "$.validation_result.sentiment",
+        "last_user_message.$": "$.request.message",
+        "last_ai_response.$": "$.validation_result.validated_response",
+        "message_count.$": "$.context.message_count",
+        "intent.$": "$.intent_result.intent",
+        "urgency.$": "$.intent_result.urgency"
+      },
+      "ResultPath": "$.escalation_result",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.escalation_error",
+          "Next": "EscalationFailed"
+        }
+      ],
+      "Next": "FormatEscalatedResponse"
+    },
+
+    "EscalationFailed": {
+      "Type": "Pass",
+      "Comment": "Handle escalation routing failure (fail-open, return AI response)",
+      "Parameters": {
+        "escalation_result": {
+          "success": false,
+          "fallback": true,
+          "customer_message": "I've noted your concern. If you need additional assistance, please ask to speak with a support agent."
+        }
+      },
+      "ResultPath": "$.escalation_result",
+      "Next": "FormatSuccessResponse"
+    },
+
+    "FormatEscalatedResponse": {
+      "Type": "Pass",
+      "Comment": "Format response for escalated conversation",
+      "Parameters": {
+        "statusCode": 200,
+        "body": {
+          "conversation_id.$": "$.request.conversation_id",
+          "message_id.$": "$.request_id",
+          "response.$": "$.escalation_result.customer_message",
+          "sources.$": "$.rag.sources",
+          "escalation": {
+            "triggered": true,
+            "priority.$": "$.escalation_result.priority",
+            "escalation_id.$": "$.escalation_result.escalation_id",
+            "estimated_wait.$": "$.escalation_result.estimated_wait"
+          },
+          "metadata": {
+            "model.$": "$.bedrock_result.model_id",
+            "intent.$": "$.intent_result.intent",
+            "intent_confidence.$": "$.intent_result.confidence",
+            "sentiment.$": "$.validation_result.sentiment.sentiment",
+            "escalation_score.$": "$.validation_result.escalation.score",
+            "rag_documents_used.$": "States.ArrayLength($.rag.documents)",
+            "latency_ms": {
+              "start_time.$": "$.start_time"
+            }
+          }
+        }
+      },
+      "End": true
+    },
+
+    "FormatSuccessResponse": {
+      "Type": "Pass",
+      "Comment": "Format successful response (no escalation)",
+      "Parameters": {
+        "statusCode": 200,
+        "body": {
+          "conversation_id.$": "$.request.conversation_id",
+          "message_id.$": "$.request_id",
+          "response.$": "$.validation_result.validated_response",
+          "sources.$": "$.rag.sources",
+          "escalation": {
+            "triggered": false,
+            "score.$": "$.validation_result.escalation.score"
+          },
+          "metadata": {
+            "model.$": "$.bedrock_result.model_id",
+            "intent.$": "$.intent_result.intent",
+            "intent_confidence.$": "$.intent_result.confidence",
+            "sentiment.$": "$.validation_result.sentiment.sentiment",
+            "rag_documents_used.$": "States.ArrayLength($.rag.documents)",
+            "latency_ms": {
+              "start_time.$": "$.start_time"
+            }
+          }
+        }
+      },
+      "End": true
+    }
+  }
+}
