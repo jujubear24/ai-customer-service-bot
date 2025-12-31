@@ -1,5 +1,10 @@
 # Note: terraform{} and provider{} blocks are in versions.tf
 
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+
 # ==============================================================================
 # Local Variables
 # ==============================================================================
@@ -392,4 +397,79 @@ module "knowledge_base" {
   semantic_chunking_breakpoint_threshold = 95
 
   tags = local.common_tags
+}
+
+# ==============================================================================
+# Step Functions Orchestration (Conditional)
+# ==============================================================================
+
+module "step_functions" {
+  count  = var.use_step_functions ? 1 : 0
+  source = "../../modules/step_functions"
+
+  project_name = var.project_name
+  environment  = var.environment
+  region       = data.aws_region.current.name
+  account_id   = data.aws_caller_identity.current.account_id
+
+  # Lambda Function ARNs
+  intent_classifier_arn  = module.lambda.function_arns["intent-classifier"]
+  context_builder_arn    = module.lambda.function_arns["context-builder"]
+  rag_retriever_arn      = module.lambda.function_arns["rag-retriever"]
+  bedrock_handler_arn    = module.lambda.function_arns["bedrock-handler"]
+  response_validator_arn = module.lambda.function_arns["response-validator"]
+  escalation_router_arn  = module.lambda.function_arns["escalation-router"]
+
+  # Configuration
+  log_retention_days     = 7
+  log_level              = var.step_functions_log_level
+  enable_xray_tracing    = true
+  include_execution_data = true
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
+# API Gateway Permission for Step Functions (Conditional)
+# ==============================================================================
+
+resource "aws_iam_role" "api_gateway_step_functions" {
+  count = var.use_step_functions ? 1 : 0
+  name  = "${var.project_name}-${var.environment}-apigw-sfn-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "apigateway.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "api_gateway_step_functions" {
+  count = var.use_step_functions ? 1 : 0
+  name  = "${var.project_name}-${var.environment}-apigw-sfn-policy"
+  role  = aws_iam_role.api_gateway_step_functions[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "states:StartSyncExecution"
+        ]
+        Resource = [
+          module.step_functions[0].state_machine_arn
+        ]
+      }
+    ]
+  })
 }

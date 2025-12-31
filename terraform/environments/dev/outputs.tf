@@ -126,3 +126,42 @@ output "escalation_sns_topic_arn" {
   description = "ARN of the escalation SNS topic (if enabled)"
   value       = module.escalation.sns_topic_arn
 }
+
+# ==============================================================================
+# Step Functions Outputs
+# ==============================================================================
+
+output "step_functions_state_machine_arn" {
+  description = "ARN of the Step Functions state machine (if enabled)"
+  value       = var.use_step_functions ? module.step_functions[0].state_machine_arn : null
+}
+
+output "step_functions_state_machine_name" {
+  description = "Name of the Step Functions state machine (if enabled)"
+  value       = var.use_step_functions ? module.step_functions[0].state_machine_name : null
+}
+
+output "step_functions_execution_arn" {
+  description = "Execution ARN prefix for API Gateway integration (if enabled)"
+  value       = var.use_step_functions ? module.step_functions[0].execution_arn : null
+}
+
+output "step_functions_sync_execution_uri" {
+  description = "URI for API Gateway synchronous execution (if enabled)"
+  value       = var.use_step_functions ? module.step_functions[0].sync_execution_uri : null
+}
+
+output "step_functions_log_group_name" {
+  description = "CloudWatch log group for Step Functions (if enabled)"
+  value       = var.use_step_functions ? module.step_functions[0].log_group_name : null
+}
+
+output "step_functions_role_arn" {
+  description = "IAM role ARN for Step Functions (if enabled)"
+  value       = var.use_step_functions ? module.step_functions[0].role_arn : null
+}
+
+output "api_gateway_step_functions_role_arn" {
+  description = "IAM role ARN for API Gateway to invoke Step Functions (if enabled)"
+  value       = var.use_step_functions ? aws_iam_role.api_gateway_step_functions[0].arn : null
+}

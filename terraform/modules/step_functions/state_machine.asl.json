@@ -188,7 +188,7 @@
         "conversation_id.$": "$.request.conversation_id",
         "intent.$": "$.intent_result.intent",
         "rag_context.$": "$.rag.documents",
-        "conversation_history.$": "$.context.messages"
+        "conversation_history.$": "$.context.context.messages"
       },
       "ResultPath": "$.bedrock_result",
       "Retry": [
@@ -246,8 +246,7 @@
         "tenant_id.$": "$.request.tenant_id",
         "intent.$": "$.intent_result.intent",
         "intent_confidence.$": "$.intent_result.confidence",
-        "urgency.$": "$.intent_result.urgency",
-        "message_count.$": "$.context.message_count",
+        "message_count.$": "$.context.context.total_messages",
         "options": {
           "check_pii": true,
           "check_profanity": true,
@@ -329,14 +328,12 @@
       "Parameters": {
         "conversation_id.$": "$.request.conversation_id",
         "tenant_id.$": "$.request.tenant_id",
-        "user_id.$": "$.request.user_id",
         "escalation.$": "$.validation_result.escalation",
         "sentiment.$": "$.validation_result.sentiment",
         "last_user_message.$": "$.request.message",
         "last_ai_response.$": "$.validation_result.validated_response",
-        "message_count.$": "$.context.message_count",
-        "intent.$": "$.intent_result.intent",
-        "urgency.$": "$.intent_result.urgency"
+        "message_count.$": "$.context.context.total_messages",
+        "intent.$": "$.intent_result.intent"
       },
       "ResultPath": "$.escalation_result",
       "Retry": [

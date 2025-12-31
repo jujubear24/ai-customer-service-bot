@@ -67,3 +67,24 @@ variable "aurora_master_password" {
   type        = string
   sensitive   = true
 }
+
+# ==============================================================================
+# Step Functions Configuration
+# ==============================================================================
+
+variable "use_step_functions" {
+  description = "Enable Step Functions orchestration instead of direct Lambda invocation"
+  type        = bool
+  default     = false
+}
+
+variable "step_functions_log_level" {
+  description = "Logging level for Step Functions (ALL, ERROR, FATAL, OFF)"
+  type        = string
+  default     = "ALL"
+
+  validation {
+    condition     = contains(["ALL", "ERROR", "FATAL", "OFF"], var.step_functions_log_level)
+    error_message = "step_functions_log_level must be one of: ALL, ERROR, FATAL, OFF"
+  }
+}
