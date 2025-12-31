@@ -27,7 +27,7 @@ variable "intent_classifier_function_name" {
 }
 
 # ==============================================================================
-# Function Integration - Chat Orchestrator
+# Function Integration - Chat Orchestrator (Lambda)
 # ==============================================================================
 
 variable "chat_orchestrator_invoke_arn" {
@@ -38,6 +38,28 @@ variable "chat_orchestrator_invoke_arn" {
 variable "chat_orchestrator_function_name" {
   description = "The name of the chat orchestrator Lambda function"
   type        = string
+}
+
+# ==============================================================================
+# Step Functions Integration (Optional)
+# ==============================================================================
+
+variable "use_step_functions" {
+  description = "Use Step Functions for chat orchestration instead of Lambda"
+  type        = bool
+  default     = false
+}
+
+variable "step_functions_arn" {
+  description = "ARN of the Step Functions state machine (required if use_step_functions is true)"
+  type        = string
+  default     = null
+}
+
+variable "step_functions_role_arn" {
+  description = "ARN of the IAM role for API Gateway to invoke Step Functions (required if use_step_functions is true)"
+  type        = string
+  default     = null
 }
 
 # ==============================================================================

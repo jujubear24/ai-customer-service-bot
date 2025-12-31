@@ -322,13 +322,18 @@ module "api_gateway" {
   project_name = var.project_name
   environment  = var.environment
 
-  #Intent Classier
+  # Intent Classifier
   intent_classifier_invoke_arn    = module.lambda.function_invoke_arns["intent-classifier"]
   intent_classifier_function_name = module.lambda.function_names["intent-classifier"]
 
-  #Chat Orchestrator
+  # Chat Orchestrator (Lambda - used when use_step_functions = false)
   chat_orchestrator_invoke_arn    = module.lambda.function_invoke_arns["chat-orchestrator"]
   chat_orchestrator_function_name = module.lambda.function_names["chat-orchestrator"]
+
+  # Step Functions Integration (used when use_step_functions = true)
+  use_step_functions      = var.use_step_functions
+  step_functions_arn      = var.use_step_functions ? module.step_functions[0].state_machine_arn : null
+  step_functions_role_arn = var.use_step_functions ? aws_iam_role.api_gateway_step_functions[0].arn : null
 
   log_retention_days     = 7
   api_logging_level      = "INFO"
@@ -339,7 +344,6 @@ module "api_gateway" {
 
   common_tags = local.common_tags
 }
-
 # ==============================================================================
 # Observability Module
 # ==============================================================================

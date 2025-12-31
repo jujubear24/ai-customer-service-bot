@@ -1,6 +1,6 @@
 #
 # API Gateway Module
-# Creates a REST API Gateway with Lambda integration
+# Creates a REST API Gateway with Lambda or Step Functions integration
 #
 
 terraform {
@@ -13,6 +13,12 @@ terraform {
     }
   }
 }
+
+# ==============================================================================
+# Data Sources
+# ==============================================================================
+
+data "aws_region" "current" {}
 
 # ==============================================================================
 # REST API Gateway
@@ -297,8 +303,13 @@ resource "aws_api_gateway_model" "chat_request" {
   })
 }
 
-# Lambda integration for chat orchestrator
+# ==============================================================================
+# /chat Lambda Integration (when NOT using Step Functions)
+# ==============================================================================
+
 resource "aws_api_gateway_integration" "chat_lambda" {
+  count = var.use_step_functions ? 0 : 1
+
   rest_api_id             = aws_api_gateway_rest_api.main.id
   resource_id             = aws_api_gateway_resource.chat.id
   http_method             = aws_api_gateway_method.chat_post.http_method
@@ -309,6 +320,8 @@ resource "aws_api_gateway_integration" "chat_lambda" {
 
 # Lambda permission for API Gateway to invoke chat orchestrator
 resource "aws_lambda_permission" "api_gateway_chat_orchestrator" {
+  count = var.use_step_functions ? 0 : 1
+
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
   function_name = var.chat_orchestrator_function_name
@@ -316,7 +329,175 @@ resource "aws_lambda_permission" "api_gateway_chat_orchestrator" {
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
 
-# OPTIONS method for CORS preflight
+# ==============================================================================
+# /chat Step Functions Integration (when using Step Functions)
+# ==============================================================================
+
+resource "aws_api_gateway_integration" "chat_step_functions" {
+  count = var.use_step_functions ? 1 : 0
+
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.chat.id
+  http_method             = aws_api_gateway_method.chat_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS"
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:states:action/StartSyncExecution"
+  credentials             = var.step_functions_role_arn
+
+  # Transform the incoming request to Step Functions format
+  # Wrap the body in {"body": ...} to match ASL expectations
+  request_templates = {
+    "application/json" = <<-EOF
+#set($wrapper = '{"body": ' + $input.json('$') + '}')
+{
+  "stateMachineArn": "${var.step_functions_arn}",
+  "input": "$util.escapeJavaScript($wrapper)"
+}
+EOF
+  }
+
+  # Ensure we wait for the sync response
+  passthrough_behavior = "NEVER"
+}
+
+# Method response for Step Functions integration
+resource "aws_api_gateway_method_response" "chat_post_200" {
+  count = var.use_step_functions ? 1 : 0
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_post.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_method_response" "chat_post_500" {
+  count = var.use_step_functions ? 1 : 0
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_post.http_method
+  status_code = "500"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+# Integration response for Step Functions - Success
+resource "aws_api_gateway_integration_response" "chat_step_functions_200" {
+  count = var.use_step_functions ? 1 : 0
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_post.http_method
+  status_code = "200"
+
+  # Match successful executions
+  selection_pattern = ".*\"status\":\\s*\"SUCCEEDED\".*"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+  }
+
+  # Extract the output from Step Functions response
+  # The Step Functions sync response contains: { "output": "...", "status": "SUCCEEDED", ... }
+  response_templates = {
+    "application/json" = <<-EOF
+#set($output = $util.parseJson($input.path('$.output')))
+#if($output.statusCode && $output.statusCode != 200)
+#set($context.responseOverride.status = $output.statusCode)
+#end
+#if($output.body)
+$util.toJson($output.body)
+#else
+$input.path('$.output')
+#end
+EOF
+  }
+
+  depends_on = [aws_api_gateway_integration.chat_step_functions]
+}
+
+# Integration response for Step Functions - Failure
+resource "aws_api_gateway_integration_response" "chat_step_functions_500" {
+  count = var.use_step_functions ? 1 : 0
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_post.http_method
+  status_code = "500"
+
+  # Match failed executions
+  selection_pattern = ".*\"status\":\\s*\"FAILED\".*"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+  }
+
+  response_templates = {
+    "application/json" = <<-EOF
+#set($errorCause = $input.path('$.cause'))
+{
+  "error": "WORKFLOW_FAILED",
+  "message": "An error occurred processing your request. Please try again.",
+  "details": "$util.escapeJavaScript($errorCause)"
+}
+EOF
+  }
+
+  depends_on = [aws_api_gateway_integration.chat_step_functions]
+}
+
+# Integration response for Step Functions - Default (catch-all)
+resource "aws_api_gateway_integration_response" "chat_step_functions_default" {
+  count = var.use_step_functions ? 1 : 0
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_post.http_method
+  status_code = "200"
+
+  # Default catch-all (empty pattern)
+  selection_pattern = ""
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+  }
+
+  # Passthrough for any unmatched responses
+  response_templates = {
+    "application/json" = <<-EOF
+#if($input.path('$.output'))
+$input.path('$.output')
+#else
+{"error": "UNEXPECTED_RESPONSE", "raw": "$util.escapeJavaScript($input.body)"}
+#end
+EOF
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.chat_step_functions,
+    aws_api_gateway_integration_response.chat_step_functions_200,
+    aws_api_gateway_integration_response.chat_step_functions_500
+  ]
+}
+
+# ==============================================================================
+# /chat OPTIONS (CORS) - Always present
+# ==============================================================================
+
 resource "aws_api_gateway_method" "chat_options" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   resource_id   = aws_api_gateway_resource.chat.id
@@ -384,9 +565,16 @@ resource "aws_api_gateway_deployment" "main" {
       # Chat resources
       aws_api_gateway_resource.chat.id,
       aws_api_gateway_method.chat_post.id,
-      aws_api_gateway_integration.chat_lambda.id,
       aws_api_gateway_method.chat_options.id,
       aws_api_gateway_integration.chat_options.id,
+      # Conditional integrations - use try() for optional resources
+      try(aws_api_gateway_integration.chat_lambda[0].id, ""),
+      try(aws_api_gateway_integration.chat_step_functions[0].id, ""),
+      try(aws_api_gateway_integration_response.chat_step_functions_200[0].id, ""),
+      try(aws_api_gateway_integration_response.chat_step_functions_500[0].id, ""),
+      try(aws_api_gateway_integration_response.chat_step_functions_default[0].id, ""),
+      # Feature flag state
+      var.use_step_functions,
     ]))
   }
 
@@ -397,7 +585,6 @@ resource "aws_api_gateway_deployment" "main" {
   depends_on = [
     aws_api_gateway_integration.classify_intent_lambda,
     aws_api_gateway_integration.classify_intent_options,
-    aws_api_gateway_integration.chat_lambda,
     aws_api_gateway_integration.chat_options,
   ]
 }
@@ -426,6 +613,10 @@ resource "aws_api_gateway_stage" "main" {
   }
 
   xray_tracing_enabled = true
+
+  variables = {
+    use_step_functions = var.use_step_functions ? "true" : "false"
+  }
 
   tags = merge(var.common_tags, {
     Name        = "${var.project_name}-api-stage-${var.environment}"

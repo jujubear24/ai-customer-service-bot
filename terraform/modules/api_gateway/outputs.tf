@@ -46,3 +46,12 @@ output "api_log_group" {
   description = "CloudWatch log group for API Gateway"
   value       = aws_cloudwatch_log_group.api_gateway.name
 }
+
+# ==============================================================================
+# Step Functions Integration Info
+# ==============================================================================
+
+output "chat_backend_type" {
+  description = "Backend type for /chat endpoint (lambda or step_functions)"
+  value       = var.use_step_functions ? "step_functions" : "lambda"
+}
