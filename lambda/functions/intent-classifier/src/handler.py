@@ -1,172 +1,163 @@
-"""Main handler for intent-classifier Lambda function."""
+"""Intent Classifier Lambda handler with Step Functions compatibility.
+
+Supports both Step Functions and API Gateway invocations.
+"""
+
+from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from aws_lambda_powertools import Logger, Tracer
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from pydantic import BaseModel, Field, field_validator
 
-from shared.config import Config
-from shared.exceptions import LambdaError, ValidationError
-from shared.metrics import MetricUnit, metrics
-from shared.types import LambdaResponse
-from shared.utils import format_response, get_correlation_id, parse_json_body
+from shared.exceptions import NonRetryableError, ValidationError
+from shared.sf_adapter import StepFunctionsAdapter
 
-# Import classifier - use TYPE_CHECKING to satisfy mypy
+# Import classifier
 if TYPE_CHECKING:
     from src.classifier import IntentClassifier
 else:
     try:
         from classifier import IntentClassifier
     except ImportError:
-        # Fallback for local testing where src is a package
         from src.classifier import IntentClassifier
 
+# =============================================================================
 # Initialize
-config = Config.from_env()
+# =============================================================================
+
 logger = Logger(service="intent-classifier")
 tracer = Tracer(service="intent-classifier")
+metrics = Metrics()
 
 # Initialize classifier once (reuse across invocations)
 classifier = IntentClassifier()
 
 
-@logger.inject_lambda_context
-@tracer.capture_lambda_handler
-@metrics.log_metrics
-def lambda_handler(event: dict[str, Any], context: LambdaContext) -> LambdaResponse:
-    """
-    Main Lambda handler function for intent classification.
+# =============================================================================
+# Request/Response Models
+# =============================================================================
 
-    Expected input (API Gateway):
-    {
-        "body": {
-            "message": "I need to speak to a manager",
-            "conversation_history": []  // Optional
-        }
-    }
 
-    Returns:
-        Response with classified intent, confidence, and entities
-    """
-    correlation_id = get_correlation_id(event)
+class IntentClassifierRequest(BaseModel):
+    """Request model for intent classification."""
 
-    logger.info(
-        "Processing intent classification request", extra={"correlation_id": correlation_id}
+    message: str = Field(..., min_length=1, max_length=2000, description="User message to classify")
+    conversation_id: str | None = Field(default=None, description="Conversation ID for correlation")
+    conversation_history: list[dict[str, Any]] | None = Field(
+        default=None, max_length=50, description="Optional conversation history"
     )
 
-    # Add custom metric
-    metrics.add_metric(name="FunctionInvocation", unit=MetricUnit.Count, value=1)
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, v: str) -> str:
+        """Strip whitespace and validate non-empty."""
+        v = v.strip()
+        if not v:
+            raise ValueError("Message cannot be empty")
+        return v
+
+
+class IntentClassifierResponse(BaseModel):
+    """Response model for intent classification."""
+
+    intent: str = Field(..., description="Classified intent")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Classification confidence")
+    entities: dict[str, Any] = Field(default_factory=dict, description="Extracted entities")
+    requires_context: bool = Field(default=False, description="Whether context is needed")
+    conversation_id: str | None = Field(default=None, description="Echoed conversation ID")
+
+
+# =============================================================================
+# Handler
+# =============================================================================
+
+
+@logger.inject_lambda_context
+@tracer.capture_lambda_handler
+@metrics.log_metrics(capture_cold_start_metric=True)
+def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
+    """Lambda handler for intent classification.
+
+    Step Functions Input:
+        {
+            "message": "I need to speak to a manager",
+            "conversation_id": "conv-123"
+        }
+
+    Step Functions Output:
+        {
+            "intent": "escalation",
+            "confidence": 0.95,
+            "entities": {},
+            "requires_context": false,
+            "conversation_id": "conv-123"
+        }
+    """
+    adapter = StepFunctionsAdapter(event)
+    logger.append_keys(invocation_source=adapter.source.value)
 
     try:
-        # Parse and validate input
-        body = parse_json_body(event.get("body"))
-        message, conversation_history = validate_and_extract_input(body)
-
-        # Classify intent (only pass message, not conversation_history)
-        classification = classifier.classify(message)
+        # Parse and validate request
+        request = adapter.parse_model(IntentClassifierRequest)
 
         logger.info(
-            "Successfully classified intent",
+            "Processing intent classification",
             extra={
-                "correlation_id": correlation_id,
+                "conversation_id": request.conversation_id,
+                "message_length": len(request.message),
+            },
+        )
+
+        # Classify intent
+        classification = classifier.classify(request.message)
+
+        # Build response
+        response = IntentClassifierResponse(
+            intent=classification.intent,
+            confidence=classification.confidence,
+            entities=classification.entities,
+            requires_context=classification.requires_context,
+            conversation_id=request.conversation_id,
+        )
+
+        # Record metrics
+        metrics.add_metric(name="IntentClassified", unit=MetricUnit.Count, value=1)
+        metrics.add_metric(name=f"Intent_{classification.intent}", unit=MetricUnit.Count, value=1)
+
+        logger.info(
+            "Intent classified successfully",
+            extra={
                 "intent": classification.intent,
                 "confidence": classification.confidence,
             },
         )
 
-        metrics.add_metric(name="SuccessfulClassification", unit=MetricUnit.Count, value=1)
-        metrics.add_metric(
-            name=f"Intent_{classification.intent}",
-            unit=MetricUnit.Count,
-            value=1,
-        )
-
-        return format_response(
-            200,
-            {
-                "message": "Intent classified successfully",
-                "classification": classification.model_dump(),
-                "correlation_id": correlation_id,
-            },
-        )
+        return adapter.success_response(response)
 
     except ValidationError as e:
-        logger.warning(f"Validation error: {str(e)}", exc_info=True)
-        metrics.add_metric(name="ValidationError", unit=MetricUnit.Count, value=1)
-
-        return format_response(
-            400,
-            {
-                "error": "ValidationError",
-                "message": str(e),
-                "correlation_id": correlation_id,
-            },
-        )
-
-    except LambdaError as e:
-        logger.error(f"Lambda error: {str(e)}", exc_info=True)
-        metrics.add_metric(name="LambdaError", unit=MetricUnit.Count, value=1)
-
-        return format_response(
-            500,
-            {
-                "error": type(e).__name__,
-                "message": str(e),
-                "correlation_id": correlation_id,
-            },
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        metrics.add_metric(name="ValidationErrors", unit=MetricUnit.Count, value=1)
+        return adapter.error_response(e, status_code=400)
 
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        metrics.add_metric(name="UnexpectedError", unit=MetricUnit.Count, value=1)
-
-        return format_response(
-            500,
-            {
-                "error": "InternalServerError",
-                "message": "An unexpected error occurred",
-                "correlation_id": correlation_id,
-            },
+        logger.exception("Unexpected error during classification")
+        metrics.add_metric(name="ClassificationErrors", unit=MetricUnit.Count, value=1)
+        error = NonRetryableError(
+            message=f"Classification failed: {str(e)}",
+            details={"original_error": type(e).__name__},
         )
+        return adapter.error_response(error, status_code=500)
 
 
-@tracer.capture_method
-def validate_and_extract_input(body: dict[str, Any]) -> tuple[str, list[dict[str, Any]] | None]:
-    """
-    Validate incoming request body and extract required fields.
-
-    Args:
-        body: Parsed request body
-
-    Returns:
-        Tuple of (message, conversation_history)
-
-    Raises:
-        ValidationError: If validation fails
-    """
-    if not body:
-        raise ValidationError("Request body cannot be empty")
-
-    # Extract and validate message
-    message = body.get("message", "").strip()
-    if not message:
-        raise ValidationError("'message' field is required and cannot be empty")
-
-    if len(message) > 2000:
-        raise ValidationError("'message' exceeds maximum length of 2000 characters")
-
-    # Extract optional conversation history
-    conversation_history = body.get("conversation_history")
-    if conversation_history is not None:
-        if not isinstance(conversation_history, list):
-            raise ValidationError("'conversation_history' must be an array")
-
-        if len(conversation_history) > 50:
-            raise ValidationError("'conversation_history' exceeds maximum of 50 messages")
-
-    logger.debug(
-        f"Validated input - message length: {len(message)}, "
-        f"history length: {len(conversation_history) if conversation_history else 0}"
-    )
-
-    return message, conversation_history
+# Default response for fail-open behavior in Step Functions
+DEFAULT_INTENT_RESPONSE: dict[str, Any] = {
+    "intent": "general_inquiry",
+    "confidence": 0.0,
+    "entities": {},
+    "requires_context": False,
+    "conversation_id": None,
+    "_default_used": True,
+}

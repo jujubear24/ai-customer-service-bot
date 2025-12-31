@@ -1,13 +1,7 @@
-"""
-RAG Retriever Lambda Handler.
+"""RAG Retriever Lambda handler with Step Functions compatibility.
 
-Entry point for retrieving documents from Amazon Bedrock Knowledge Base.
-Integrates with the Bedrock Handler Lambda via the rag_context field.
-
-Environment Variables:
-    KNOWLEDGE_BASE_ID: ID of the Bedrock Knowledge Base
-    LOG_LEVEL: Logging level (default: INFO)
-    POWERTOOLS_SERVICE_NAME: Service name for logging
+Retrieves documents from Amazon Bedrock Knowledge Base.
+Supports both Step Functions and API Gateway invocations.
 """
 
 from __future__ import annotations
@@ -18,19 +12,29 @@ from typing import Any
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.typing import LambdaContext
-from pydantic import ValidationError
 
-from models import RetrievalError, RetrievalRequest, RetrievalResponse
+from models import RetrievalRequest
 from service import (
     KnowledgeBaseNotFoundError,
     RetrievalService,
     RetrievalServiceError,
-    ThrottlingError,
 )
+from service import (
+    ThrottlingError as ServiceThrottlingError,
+)
+from shared.exceptions import (
+    NonRetryableError,
+    ThrottlingError,
+    ValidationError,
+)
+from shared.sf_adapter import StepFunctionsAdapter
 
-# Initialize Powertools
-logger = Logger()
-tracer = Tracer()
+# =============================================================================
+# Initialize
+# =============================================================================
+
+logger = Logger(service="rag-retriever")
+tracer = Tracer(service="rag-retriever")
 metrics = Metrics()
 
 # Configuration
@@ -46,7 +50,10 @@ def get_service() -> RetrievalService:
     global _service
     if _service is None:
         if not KNOWLEDGE_BASE_ID:
-            raise ValueError("KNOWLEDGE_BASE_ID environment variable not set")
+            raise NonRetryableError(
+                message="KNOWLEDGE_BASE_ID environment variable not set",
+                error_code="CONFIGURATION_ERROR",
+            )
         _service = RetrievalService(
             knowledge_base_id=KNOWLEDGE_BASE_ID,
             region=AWS_REGION,
@@ -54,58 +61,57 @@ def get_service() -> RetrievalService:
     return _service
 
 
-def create_error_response(
-    status_code: int,
-    error: RetrievalError,
-) -> dict[str, Any]:
-    """Create a standardized error response."""
-    return {
-        "statusCode": status_code,
-        "body": error.model_dump_json(),
-        "headers": {
-            "Content-Type": "application/json",
-        },
-    }
-
-
-def create_success_response(response: RetrievalResponse) -> dict[str, Any]:
-    """Create a standardized success response."""
-    return {
-        "statusCode": 200,
-        "body": response.model_dump_json(),
-        "headers": {
-            "Content-Type": "application/json",
-        },
-    }
+# =============================================================================
+# Handler
+# =============================================================================
 
 
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
+    """Lambda handler for RAG retrieval.
+
+    Step Functions Input:
+        {
+            "query": "How do I reset my password?",
+            "tenant_id": "tenant-456",
+            "conversation_id": "conv-123",
+            "top_k": 5,
+            "min_score": 0.5
+        }
+
+    Step Functions Output:
+        {
+            "documents": [
+                {
+                    "content": "To reset your password...",
+                    "score": 0.89,
+                    "source_name": "password-guide.pdf",
+                    "source_uri": "s3://...",
+                    "metadata": {}
+                }
+            ],
+            "query": "How do I reset my password?",
+            "total_found": 3,
+            "retrieval_time_ms": 156.2
+        }
     """
-    Lambda handler for RAG retrieval.
-
-    Accepts a retrieval request and returns matching documents from
-    the Bedrock Knowledge Base.
-
-    Args:
-        event: Lambda event containing retrieval request
-        context: Lambda context
-
-    Returns:
-        API Gateway-style response with retrieval results or error
-    """
-    logger.info("Processing retrieval request", event_keys=list(event.keys()))
+    adapter = StepFunctionsAdapter(event)
+    logger.append_keys(invocation_source=adapter.source.value)
 
     try:
         # Parse and validate request
-        request = _parse_request(event)
+        request = adapter.parse_model(RetrievalRequest)
+
         logger.info(
-            "Request validated",
-            tenant_id=request.tenant_id,
-            query_length=len(request.query),
-            top_k=request.top_k,
+            "Processing retrieval request",
+            extra={
+                "tenant_id": request.tenant_id,
+                "conversation_id": request.conversation_id,
+                "query_length": len(request.query),
+                "top_k": request.top_k,
+            },
         )
 
         # Add correlation IDs to logger
@@ -119,139 +125,105 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
         response = service.retrieve(request)
 
         # Record metrics
-        _record_metrics(response)
+        metrics.add_metric(
+            name="DocumentsRetrieved",
+            unit=MetricUnit.Count,
+            value=len(response.documents),
+        )
+        metrics.add_metric(
+            name="RetrievalLatency",
+            unit=MetricUnit.Milliseconds,
+            value=response.retrieval_time_ms,
+        )
+
+        if response.has_results:
+            metrics.add_metric(
+                name="AverageRelevanceScore",
+                unit=MetricUnit.NoUnit,
+                value=response.average_score,
+            )
+        else:
+            metrics.add_metric(name="NoResultsReturned", unit=MetricUnit.Count, value=1)
 
         logger.info(
             "Retrieval successful",
-            documents_returned=len(response.documents),
-            average_score=round(response.average_score, 3),
-            retrieval_time_ms=round(response.retrieval_time_ms, 2),
+            extra={
+                "documents_returned": len(response.documents),
+                "average_score": round(response.average_score, 3),
+                "retrieval_time_ms": round(response.retrieval_time_ms, 2),
+            },
         )
 
-        return create_success_response(response)
+        return adapter.success_response(response)
 
     except ValidationError as e:
-        logger.warning("Validation error", errors=e.errors())
+        logger.warning("Validation error", extra={"error": str(e)})
         metrics.add_metric(name="ValidationErrors", unit=MetricUnit.Count, value=1)
-        return create_error_response(
-            400,
-            RetrievalError(
-                error_type="VALIDATION_ERROR",
-                message="Invalid request format",
-                details={"validation_errors": e.errors()},
-                retryable=False,
-            ),
-        )
+        return adapter.error_response(e, status_code=400)
 
     except KnowledgeBaseNotFoundError as e:
-        logger.error("Knowledge base not found", error=str(e))
+        logger.error("Knowledge base not found", extra={"error": str(e)})
         metrics.add_metric(name="KnowledgeBaseNotFound", unit=MetricUnit.Count, value=1)
-        return create_error_response(
-            404,
-            RetrievalError(
-                error_type=e.error_type,
-                message=str(e),
-                retryable=False,
-            ),
+        not_found_error = NonRetryableError(
+            message=str(e),
+            error_code="KNOWLEDGE_BASE_NOT_FOUND",
         )
+        return adapter.error_response(not_found_error, status_code=404)
 
-    except ThrottlingError as e:
-        logger.warning("Request throttled after retries", error=str(e))
+    except ServiceThrottlingError as e:
+        logger.warning("Request throttled", extra={"error": str(e)})
         metrics.add_metric(name="ThrottlingErrors", unit=MetricUnit.Count, value=1)
-        return create_error_response(
-            429,
-            RetrievalError(
-                error_type=e.error_type,
-                message=str(e),
-                retryable=True,
-            ),
+        # Convert to shared ThrottlingError for Step Functions
+        throttle_error = ThrottlingError(
+            message=str(e),
+            service="bedrock-agent-runtime",
+            retry_after_seconds=5,
         )
+        return adapter.error_response(throttle_error, status_code=429)
 
     except RetrievalServiceError as e:
         logger.error(
             "Retrieval service error",
-            error=str(e),
-            error_type=e.error_type,
-            details=e.details,
+            extra={
+                "error": str(e),
+                "error_type": e.error_type,
+                "retryable": e.retryable,
+            },
         )
         metrics.add_metric(name="ServiceErrors", unit=MetricUnit.Count, value=1)
-        return create_error_response(
-            500,
-            RetrievalError(
-                error_type=e.error_type,
-                message=str(e),
-                details=e.details,
-                retryable=e.retryable,
-            ),
-        )
 
-    except ValueError as e:
-        logger.error("Configuration error", error=str(e))
-        metrics.add_metric(name="ConfigurationErrors", unit=MetricUnit.Count, value=1)
-        return create_error_response(
-            500,
-            RetrievalError(
-                error_type="CONFIGURATION_ERROR",
+        if e.retryable:
+            from shared.exceptions import RetryableError
+
+            retry_error = RetryableError(
                 message=str(e),
-                retryable=False,
-            ),
-        )
+                error_code=e.error_type,
+                details=e.details,
+            )
+            return adapter.error_response(retry_error, status_code=503)
+        else:
+            service_error = NonRetryableError(
+                message=str(e),
+                error_code=e.error_type,
+                details=e.details,
+            )
+            return adapter.error_response(service_error, status_code=500)
 
     except Exception as e:
-        logger.exception("Unexpected error", error=str(e))
+        logger.exception("Unexpected error")
         metrics.add_metric(name="UnexpectedErrors", unit=MetricUnit.Count, value=1)
-        return create_error_response(
-            500,
-            RetrievalError(
-                error_type="INTERNAL_ERROR",
-                message="An unexpected error occurred",
-                retryable=True,
-            ),
+        unexpected_error = NonRetryableError(
+            message=f"Retrieval failed: {str(e)}",
+            details={"original_error": type(e).__name__},
         )
+        return adapter.error_response(unexpected_error, status_code=500)
 
 
-def _parse_request(event: dict[str, Any]) -> RetrievalRequest:
-    """
-    Parse the retrieval request from the Lambda event.
-
-    Supports both direct invocation and API Gateway events.
-    """
-    # Check if this is an API Gateway event
-    if "body" in event and isinstance(event.get("body"), str):
-        import json
-
-        body = json.loads(event["body"])
-    elif "body" in event and isinstance(event.get("body"), dict):
-        body = event["body"]
-    else:
-        # Direct invocation - event IS the request
-        body = event
-
-    return RetrievalRequest.model_validate(body)
-
-
-def _record_metrics(response: RetrievalResponse) -> None:
-    """Record CloudWatch metrics for the retrieval."""
-    metrics.add_metric(
-        name="DocumentsRetrieved",
-        unit=MetricUnit.Count,
-        value=len(response.documents),
-    )
-    metrics.add_metric(
-        name="RetrievalLatency",
-        unit=MetricUnit.Milliseconds,
-        value=response.retrieval_time_ms,
-    )
-
-    if response.has_results:
-        metrics.add_metric(
-            name="AverageRelevanceScore",
-            unit=MetricUnit.NoUnit,
-            value=response.average_score,
-        )
-    else:
-        metrics.add_metric(
-            name="NoResultsReturned",
-            unit=MetricUnit.Count,
-            value=1,
-        )
+# Default response for fail-open behavior
+DEFAULT_RAG_RESPONSE: dict[str, Any] = {
+    "documents": [],
+    "query": "",
+    "total_found": 0,
+    "retrieval_time_ms": 0.0,
+    "_default_used": True,
+}

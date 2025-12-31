@@ -1042,6 +1042,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "boto3-stubs", extra = ["bedrock-runtime"] },
     { name = "moto", extra = ["all"] },
     { name = "mypy" },
     { name = "pytest" },
@@ -1054,6 +1055,7 @@ dev = [
 requires-dist = [
     { name = "aws-lambda-powertools", extras = ["tracer"], specifier = ">=2.31.0" },
     { name = "boto3", specifier = ">=1.35.0" },
+    { name = "boto3-stubs", extras = ["bedrock-runtime"], marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "moto", extras = ["all"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
@@ -1371,6 +1373,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "boto3-stubs", extra = ["bedrock-runtime"] },
     { name = "moto", extra = ["all"] },
     { name = "mypy" },
     { name = "pytest" },
@@ -1383,6 +1386,7 @@ dev = [
 requires-dist = [
     { name = "aws-lambda-powertools", extras = ["tracer"], specifier = ">=2.31.0" },
     { name = "boto3", specifier = ">=1.35.0" },
+    { name = "boto3-stubs", extras = ["bedrock-runtime"], marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "moto", extras = ["all"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "pydantic", specifier = ">=2.5.0" },

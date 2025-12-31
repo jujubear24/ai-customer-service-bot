@@ -1,36 +1,37 @@
-"""Lambda handler for Response Validator.
+"""Response Validator Lambda handler with Step Functions compatibility.
 
-This module provides the Lambda entry point for validating AI-generated responses.
-It handles request parsing, validation, and error handling.
+Validates AI-generated responses for PII, profanity, and business rules.
+Analyzes sentiment and calculates escalation scores.
+Supports both Step Functions and API Gateway invocations.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.logging import correlation_paths
+from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.typing import LambdaContext
-from pydantic import ValidationError as PydanticValidationError
 
 from models import (
     ValidationAction,
-    ValidationError,
     ValidationMetadata,
     ValidationRequest,
     ValidationResponse,
     ValidationResults,
 )
 from service import ResponseValidatorService, ValidationServiceConfig
+from shared.exceptions import NonRetryableError, ValidationError
+from shared.sf_adapter import StepFunctionsAdapter
 
 # =============================================================================
-# Powertools Setup
+# Initialize
 # =============================================================================
 
-logger = Logger()
-tracer = Tracer()
+logger = Logger(service="response-validator")
+tracer = Tracer(service="response-validator")
 metrics = Metrics()
 
 
@@ -42,19 +43,18 @@ metrics = Metrics()
 def _create_service() -> ResponseValidatorService:
     """Create validation service from environment configuration."""
     config = ValidationServiceConfig(
-        # Feature flags - existing
+        # Feature flags
         enable_pii_detection=os.getenv("ENABLE_PII_DETECTION", "true").lower() == "true",
         enable_profanity_check=os.getenv("ENABLE_PROFANITY_CHECK", "true").lower() == "true",
         enable_business_rules=os.getenv("ENABLE_BUSINESS_RULES", "true").lower() == "true",
         enable_length_check=os.getenv("ENABLE_LENGTH_CHECK", "true").lower() == "true",
-        # Feature flags - NEW for Phase 3.2
         enable_sentiment_analysis=os.getenv("ENABLE_SENTIMENT_ANALYSIS", "true").lower() == "true",
         enable_escalation_scoring=os.getenv("ENABLE_ESCALATION_SCORING", "true").lower() == "true",
         # Length settings
         min_response_length=int(os.getenv("MIN_RESPONSE_LENGTH", "20")),
         max_response_length=int(os.getenv("MAX_RESPONSE_LENGTH", "2000")),
         truncate_long_responses=os.getenv("TRUNCATE_LONG_RESPONSES", "true").lower() == "true",
-        # Escalation settings - NEW for Phase 3.2
+        # Escalation settings
         escalation_threshold=float(os.getenv("ESCALATION_THRESHOLD", "0.70")),
         # Behavior settings
         stop_on_critical_failure=os.getenv("STOP_ON_CRITICAL_FAILURE", "true").lower() == "true",
@@ -78,105 +78,8 @@ def get_service() -> ResponseValidatorService:
 
 
 # =============================================================================
-# Request Parsing
+# Fallback Response Builder
 # =============================================================================
-
-
-def _parse_request(event: dict[str, Any]) -> ValidationRequest:
-    """Parse and validate the incoming Lambda event.
-
-    Args:
-        event: Lambda event payload (direct invocation format).
-
-    Returns:
-        Validated ValidationRequest.
-
-    Raises:
-        ValueError: If the event cannot be parsed.
-    """
-    # Handle direct invocation (dict payload)
-    if isinstance(event, dict):
-        # Check if body is a JSON string (API Gateway format)
-        if "body" in event and isinstance(event["body"], str):
-            try:
-                body = json.loads(event["body"])
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in request body: {e}") from e
-        elif "body" in event and isinstance(event["body"], dict):
-            body = event["body"]
-        else:
-            # Direct invocation with payload as event
-            body = event
-
-        return ValidationRequest.model_validate(body)
-
-    raise ValueError(f"Unexpected event type: {type(event)}")
-
-
-# =============================================================================
-# Response Building
-# =============================================================================
-
-
-def _build_success_response(response: ValidationResponse) -> dict[str, Any]:
-    """Build successful Lambda response."""
-    return {
-        "statusCode": 200,
-        "body": response.model_dump(mode="json"),
-    }
-
-
-def _build_error_response(
-    error: ValidationError,
-    status_code: int = 400,
-) -> dict[str, Any]:
-    """Build error Lambda response."""
-    return {
-        "statusCode": status_code,
-        "body": error.model_dump(mode="json"),
-    }
-
-
-def _build_validation_error_response(
-    error: PydanticValidationError,
-    conversation_id: str | None = None,
-) -> dict[str, Any]:
-    """Build response for Pydantic validation errors."""
-    error_details = []
-    for err in error.errors():
-        error_details.append(
-            {
-                "field": ".".join(str(loc) for loc in err["loc"]),
-                "message": err["msg"],
-                "type": err["type"],
-            }
-        )
-
-    validation_error = ValidationError(
-        error_type="ValidationError",
-        message="Request validation failed",
-        retryable=False,
-        conversation_id=conversation_id,
-        details={"errors": error_details},
-    )
-
-    return _build_error_response(validation_error, status_code=400)
-
-
-def _build_internal_error_response(
-    error: Exception,
-    conversation_id: str | None = None,
-) -> dict[str, Any]:
-    """Build response for internal errors."""
-    validation_error = ValidationError(
-        error_type="InternalError",
-        message="An internal error occurred during validation",
-        retryable=True,
-        conversation_id=conversation_id,
-        details={"error": str(error)} if os.getenv("DEBUG", "false").lower() == "true" else None,
-    )
-
-    return _build_error_response(validation_error, status_code=500)
 
 
 def _build_fallback_validation_response(
@@ -186,10 +89,10 @@ def _build_fallback_validation_response(
     """Build a fallback ValidationResponse when validation itself fails.
 
     This ensures the caller always gets a usable response, even if validation
-    encountered an error.
+    encountered an error. Fail-open design.
     """
     return ValidationResponse(
-        is_valid=True,  # Pass through on validation failure
+        is_valid=True,
         action=ValidationAction.WARN,
         validated_response=original_response,
         original_response=original_response,
@@ -199,7 +102,7 @@ def _build_fallback_validation_response(
         metadata=ValidationMetadata(
             validation_time_ms=0.0,
             rules_evaluated=0,
-            fallback_used=False,
+            fallback_used=True,
             fallback_reason=f"validation_error: {error_message}",
             comprehend_calls=0,
         ),
@@ -207,7 +110,7 @@ def _build_fallback_validation_response(
 
 
 # =============================================================================
-# Lambda Handler
+# Handler
 # =============================================================================
 
 
@@ -215,21 +118,47 @@ def _build_fallback_validation_response(
 @tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
-    """Lambda entry point for response validation.
+    """Lambda handler for response validation.
 
-    Args:
-        event: Lambda event containing validation request.
-        context: Lambda context.
+    Step Functions Input:
+        {
+            "response_text": "I can help you reset your password...",
+            "user_message": "How do I reset my password?",
+            "conversation_id": "conv-123",
+            "tenant_id": "tenant-456",
+            "intent": "password_reset",
+            "intent_confidence": 0.92
+        }
 
-    Returns:
-        Dict with statusCode and body containing ValidationResponse or ValidationError.
+    Step Functions Output:
+        {
+            "is_valid": true,
+            "action": "PASS",
+            "validated_response": "I can help you reset your password...",
+            "original_response": "I can help you reset your password...",
+            "validation_results": {...},
+            "sentiment": {
+                "sentiment": "NEUTRAL",
+                "confidence": 0.85,
+                "scores": {...}
+            },
+            "escalation": {
+                "score": 0.25,
+                "needs_escalation": false,
+                "threshold": 0.70,
+                "factors": {...}
+            },
+            "metadata": {...}
+        }
     """
+    adapter = StepFunctionsAdapter(event)
+    logger.append_keys(invocation_source=adapter.source.value)
+
     conversation_id: str | None = None
 
     try:
         # Parse and validate request
-        logger.debug("Parsing request", extra={"event_keys": list(event.keys())})
-        request = _parse_request(event)
+        request = adapter.parse_model(ValidationRequest)
         conversation_id = request.conversation_id
 
         logger.info(
@@ -247,6 +176,23 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
         service = get_service()
         response = service.validate(request)
 
+        # Record metrics
+        metrics.add_metric(name="ValidationRequests", unit=MetricUnit.Count, value=1)
+
+        if response.is_valid:
+            metrics.add_metric(name="ValidationPassed", unit=MetricUnit.Count, value=1)
+        else:
+            metrics.add_metric(name="ValidationFailed", unit=MetricUnit.Count, value=1)
+
+        metrics.add_metric(
+            name=f"ValidationAction_{response.action.value}",
+            unit=MetricUnit.Count,
+            value=1,
+        )
+
+        if response.needs_escalation:
+            metrics.add_metric(name="EscalationTriggered", unit=MetricUnit.Count, value=1)
+
         logger.info(
             "Validation complete",
             extra={
@@ -259,42 +205,21 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
             },
         )
 
-        return _build_success_response(response)
+        return adapter.success_response(response)
 
-    except PydanticValidationError as e:
+    except ValidationError as e:
         logger.warning(
             "Request validation failed",
-            extra={
-                "conversation_id": conversation_id,
-                "error_count": len(e.errors()),
-            },
+            extra={"conversation_id": conversation_id, "error": str(e)},
         )
-        return _build_validation_error_response(e, conversation_id)
-
-    except ValueError as e:
-        logger.warning(
-            "Invalid request",
-            extra={
-                "conversation_id": conversation_id,
-                "error": str(e),
-            },
-        )
-        error = ValidationError(
-            error_type="InvalidRequest",
-            message=str(e),
-            retryable=False,
-            conversation_id=conversation_id,
-        )
-        return _build_error_response(error, status_code=400)
+        metrics.add_metric(name="RequestValidationErrors", unit=MetricUnit.Count, value=1)
+        return adapter.error_response(e, status_code=400)
 
     except Exception as e:
-        logger.exception(
-            "Unexpected error during validation",
-            extra={"conversation_id": conversation_id},
-        )
+        logger.exception("Unexpected error during validation")
+        metrics.add_metric(name="UnexpectedErrors", unit=MetricUnit.Count, value=1)
 
-        # In production, we might want to fail open and return the original response
-        # rather than blocking the entire flow
+        # Check if we should fail open
         fail_open = os.getenv("FAIL_OPEN_ON_ERROR", "false").lower() == "true"
 
         if fail_open and "response_text" in event:
@@ -306,6 +231,33 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
                 original_response=event.get("response_text", ""),
                 error_message=str(e),
             )
-            return _build_success_response(fallback_response)
+            return adapter.success_response(fallback_response)
 
-        return _build_internal_error_response(e, conversation_id)
+        error = NonRetryableError(
+            message=f"Validation failed: {str(e)}",
+            details={
+                "original_error": type(e).__name__,
+                "conversation_id": conversation_id,
+            },
+        )
+        return adapter.error_response(error, status_code=500)
+
+
+# Default response for fail-open behavior
+DEFAULT_VALIDATION_RESPONSE: dict[str, Any] = {
+    "is_valid": True,
+    "action": "PASS",
+    "validated_response": "",
+    "original_response": "",
+    "validation_results": {},
+    "sentiment": None,
+    "escalation": None,
+    "metadata": {
+        "validation_time_ms": 0.0,
+        "rules_evaluated": 0,
+        "fallback_used": True,
+        "fallback_reason": "step_functions_fallback",
+        "comprehend_calls": 0,
+    },
+    "_default_used": True,
+}
